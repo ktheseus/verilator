@@ -1738,19 +1738,35 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                     // event exists, so cgp->eventp() is always non-null here.
                     UASSERT_OBJ(cgp->eventp(), cgp,
                                 "Sentinel AstCovergroup in class must have non-null eventp");
-                    // Check if the clocking event references a member variable (unsupported)
-                    // Clocking events should be on signals/nets, not class members
+                    // Check if the clocking event references a member variable.
+                    // If so and we have an enclosing class context, rewrite via vlEnclosing
+                    // right here (the general rewrite pass below only visits coverpoints/crosses,
+                    // not the SenTree).  Otherwise, emit COVERIGN and skip.
                     bool eventUnsupported = false;
                     for (AstNode* senp = cgp->eventp()->sensesp(); senp; senp = senp->nextp()) {
                         AstSenItem* const senItemp = VN_AS(senp, SenItem);
                         if (AstVarRef* const varrefp  // LCOV_EXCL_BR_LINE
                             = VN_CAST(senItemp->sensp(), VarRef)) {
                             if (varrefp->varp()->isClassMember()) {
-                                cgp->v3warn(COVERIGN, "Unsupported: 'covergroup' clocking event "
-                                                      "on member variable");
-                                eventUnsupported = true;
-                                hasUnsupportedEvent = true;
-                                break;
+                                if (m_enclosingClassp) {
+                                    // Rewrite @(clk_event) → @(vlEnclosing.clk_event)
+                                    // We cannot use the general rewrite lambda here because the
+                                    // vlEnclosing bpVarp is injected later (after iterateChildren).
+                                    // Instead stash the info and perform the rewrite post-injection.
+                                    // For now: mark the SenItem's VarRef so we can rewrite it when
+                                    // the bpVarp is available.  Use the user int field as a flag.
+                                    UINFO(4, "Covergroup clocking event on class member '"
+                                              << varrefp->varp()->name()
+                                              << "' — queuing vlEnclosing rewrite");
+                                    varrefp->user1(1);  // flag: needs back-pointer rewrite
+                                } else {
+                                    cgp->v3warn(COVERIGN,
+                                                "Unsupported: 'covergroup' clocking event on "
+                                                "member variable outside a class context");
+                                    eventUnsupported = true;
+                                    hasUnsupportedEvent = true;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -1763,7 +1779,7 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                         itemp = nextp;
                         continue;
                     }
-                    // Remove the AstCovergroup node - either unsupported event or no event
+                    // Remove the AstCovergroup node - unsupported event
                     VL_DO_DANGLING(pushDeletep(cgp->unlinkFrBack()), cgp);
                 }
                 itemp = nextp;
@@ -1835,6 +1851,24 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                     };
                     for (AstCoverpoint* cpp : m_coverpoints) rewrite(cpp);
                     for (AstCoverCross* crossp : m_coverCrosses) rewrite(crossp);
+
+                    // Edge Case C: also rewrite any clocking-event VarRefs that were
+                    // flagged with user1(1) during the earlier SenTree scan above.
+                    // These are class-member VarRefs inside covergroup @(...) events.
+                    nodep->foreach([&](AstVarRef* refp) {
+                        if (!refp->user1()) return;
+                        refp->user1(0);  // clear flag
+                        const AstVar* const varp = refp->varp();
+                        if (!varp->isClassMember()) return;  // safety check
+                        AstVarRef* const bpRef = new AstVarRef{fl, bpVarp, VAccess::READ};
+                        AstMemberSel* const selp = new AstMemberSel{
+                            fl, bpRef, VFlagChildDType{}, varp->name()};
+                        selp->varp(const_cast<AstVar*>(varp));
+                        selp->dtypep(refp->dtypep());
+                        refp->replaceWith(selp);
+                        VL_DO_DANGLING(pushDeletep(refp), refp);
+                    });
+
                     // vlEnclosing is initialized post-construction in visit(AstNew*):
                     // the new() call site in the enclosing class will emit
                     //   cgVar.vlEnclosing = this;
@@ -1899,18 +1933,17 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         if (!bpVarp) return;
 
         FileLine* const fl = nodep->fileline();
-        // lhs: <cgVar>.vlEnclosing — clone the lhs and append a member selection.
-        // Only plain VarRef LHS is handled in this first implementation; e.g.
-        //   cg_ops = new();   → cg_ops.vlEnclosing = this;  ✓
-        // Non-VarRef LHS (e.g. this.cg_ops = new(); via MemberSel) is skipped
-        // for now — those cases still fall back to the old COVERIGN path.
-        AstVarRef* const cgLhsRefp = VN_CAST(assp->lhsp(), VarRef);
-        if (!cgLhsRefp) {
-            UINFO(5, "visit(AstNew): non-VarRef LHS for covergroup new() — skipping "
+        // lhs: <cgLhs>.vlEnclosing — clone the entire LHS of the assign and
+        // append a vlEnclosing member selection.  We support any LHS expr:
+        //   cg_ops = new();       → cg_ops.vlEnclosing = this;        ✓  (VarRef)
+        //   this.cg_ops = new();  → this.cg_ops.vlEnclosing = this;   ✓  (MemberSel)
+        //   arr[i].cg = new();    → arr[i].cg.vlEnclosing = this;     ✓  (ArraySel)
+        AstNodeExpr* const cgVarRef = assp->lhsp() ? assp->lhsp()->cloneTree(false) : nullptr;
+        if (!cgVarRef) {
+            UINFO(5, "visit(AstNew): null LHS for covergroup new() — skipping "
                      "vlEnclosing injection for " << refDtp->classp()->name());
             return;
         }
-        AstNodeExpr* const cgVarRef = cgLhsRefp->cloneTree(false);
         AstMemberSel* const lhsSel = new AstMemberSel{fl, cgVarRef, VFlagChildDType{},
                                                        "vlEnclosing"};
         lhsSel->varp(bpVarp);

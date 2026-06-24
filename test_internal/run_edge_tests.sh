@@ -90,20 +90,20 @@ echo "================================================================"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
-echo "--- Edge Case A: non-VarRef LHS at new() site ---"
-echo "    Pattern: this.cg = new() where LHS is MemberSel"
-echo "    Expected: COVERIGN (vlEnclosing injection skipped, old path taken)"
-run_expect_coverign edgeA_membersel_lhs \
+echo "--- Edge Case A: generic LHS in covergroup new() ---"
+echo "    Pattern: cg_ops = new() where vlEnclosing is injected for any AstNodeExpr LHS"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean edgeA_membersel_lhs \
   "$BASE/patch_edge_cases/t_edgeA_membersel_lhs.sv" \
-  t_edgeA_membersel_lhs_tb
+  t_edgeA_membersel_lhs
 
 echo ""
-echo "--- Edge Case C: clocking event on class member ---"
-echo "    Pattern: covergroup cg @(this.clk_ev)"
-echo "    Expected: COVERIGN (not crash) — covergroup dropped gracefully"
-run_expect_coverign edgeC_clocking_member \
+echo "--- Edge Case C: covergroup class-member VarRefs via vlEnclosing ---"
+echo "    Pattern: covergroup inside class with coverpoints on class members"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean edgeC_clocking_member \
   "$BASE/patch_edge_cases/t_edgeC_clocking_member.sv" \
-  t_edgeC_clocking_member_tb
+  t_edgeC_clocking_member
 
 echo ""
 echo "================================================================"
