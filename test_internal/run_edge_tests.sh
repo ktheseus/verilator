@@ -106,6 +106,14 @@ run_expect_clean edgeC_clocking_member \
   t_edgeC_clocking_member
 
 echo ""
+echo "--- Value range bins: {[lo:hi]} in covergroup bins ---"
+echo "    Pattern: bins b = {[8'h00:8'h7F]} — previously COVERIGN"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean bins_value_range \
+  "$BASE/patch_edge_cases/t_bins_value_range.sv" \
+  t_bins_value_range
+
+echo ""
 echo "================================================================"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "================================================================"
