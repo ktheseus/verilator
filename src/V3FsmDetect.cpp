@@ -1062,7 +1062,11 @@ class FsmDetectVisitor final : public VNVisitor {
     static ResetAssignStatus collectConstStateAssigns(AstNode* stmtp, AstVarScope*& stateVscp,
                                                       std::vector<FsmResetArcDesc>& resetArcs) {
         AstNode* nodep = skipLeadingIgnorableStmt(stmtp);
-        UASSERT_OBJ(nodep, stmtp, "Empty reset branch unexpectedly survived to FSM detection");
+        // When --coverage is active the reset branch may consist entirely of CoverInc
+        // nodes injected by the coverage pass.  skipLeadingIgnorableStmt() strips those,
+        // leaving nullptr.  That is legal: the branch has no real state assignment, so
+        // we simply report NONE and let the caller skip FSM-arc modelling for this branch.
+        if (!nodep) return ResetAssignStatus::NONE;
         for (;; nodep = nodep->nextp()) {
             AstVarScope* assignStateVscp = nullptr;
             FsmStateValue value;

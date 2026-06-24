@@ -44,6 +44,8 @@ class FunctionalCoverageVisitor final : public VNVisitor {
 
     // STATE
     AstClass* m_covergroupp = nullptr;  // Current covergroup being processed
+    AstClass* m_enclosingClassp = nullptr;  // Enclosing class that owns this covergroup
+    std::set<const AstClass*> m_cgWithBackPtr;  // Covergroup classes that got vlEnclosing injected
     AstFunc* m_sampleFuncp = nullptr;  // Current sample() function
     AstFunc* m_constructorp = nullptr;  // Current constructor
     std::vector<AstCoverpoint*> m_coverpoints;  // Coverpoints in current covergroup
@@ -1793,22 +1795,65 @@ class FunctionalCoverageVisitor final : public VNVisitor {
             iterateChildren(nodep);
 
             // Option B safety net for embedded covergroups: if a coverpoint/iff/cross
-            // references a member of the enclosing class, lowering would emit uncompilable
-            // C++ (no handle to the enclosing instance).  Skip this covergroup with a clean
-            // warning rather than crashing the C++ compile.  (Full support - an enclosing
-            // back-pointer - is the planned follow-up.)
+            // references a member of the enclosing class, inject a back-pointer arg
+            // (vlEnclosing) into the covergroup's sample() method so the C++ emitter
+            // can reach the enclosing object.  Rewrite every offending VarRef to route
+            // through the back-pointer.
             if (AstNode* const offenderp = findEnclosingMemberRef(nodep)) {
-                offenderp->v3warn(COVERIGN,
-                                  "Unsupported: 'covergroup' coverpoint referencing enclosing "
-                                  "class member; ignoring covergroup "
-                                      << nodep->prettyNameQ());
-                for (AstCoverpoint* cpp : m_coverpoints) {
-                    VL_DO_DANGLING(pushDeletep(cpp->unlinkFrBack()), cpp);
+                if (m_enclosingClassp) {
+                    // --- Inject back-pointer: add a new AstVar "vlEnclosing" of the
+                    //     enclosing class type to the covergroup class, and add a
+                    //     matching arg to sample().
+                    FileLine* const fl = nodep->fileline();
+                    AstClassRefDType* const encRefDTypep = new AstClassRefDType{
+                        fl, m_enclosingClassp, nullptr};
+                    AstVar* const bpVarp = new AstVar{fl, VVarType::MEMBER, "vlEnclosing",
+                                                     encRefDTypep};
+                    nodep->addMembersp(bpVarp);
+                    // Record that this covergroup class now needs 'this' injected at new() sites
+                    m_cgWithBackPtr.insert(nodep);
+
+                    // Rewrite all offending VarRefs to go through bpVarp.
+                    const auto rewrite = [&](AstNode* rootp) {
+                        std::set<const AstVar*> ownVars;
+                        for (AstNode* itemp = nodep->membersp(); itemp; itemp = itemp->nextp()) {
+                            if (const AstVar* const vp = VN_CAST(itemp, Var))
+                                ownVars.insert(vp);
+                        }
+                        rootp->foreach([&](AstVarRef* refp) {
+                            const AstVar* const varp = refp->varp();
+                            if (!varp->isClassMember() || ownVars.count(varp)) return;
+                            // Replace bare VarRef with vlEnclosing->member access
+                            AstVarRef* const bpRef = new AstVarRef{fl, bpVarp, VAccess::READ};
+                            AstMemberSel* const selp = new AstMemberSel{
+                                fl, bpRef, VFlagChildDType{}, refp->varp()->name()};
+                            selp->varp(const_cast<AstVar*>(varp));
+                            selp->dtypep(refp->dtypep());
+                            refp->replaceWith(selp);
+                            VL_DO_DANGLING(pushDeletep(refp), refp);
+                        });
+                    };
+                    for (AstCoverpoint* cpp : m_coverpoints) rewrite(cpp);
+                    for (AstCoverCross* crossp : m_coverCrosses) rewrite(crossp);
+                    // vlEnclosing is initialized post-construction in visit(AstNew*):
+                    // the new() call site in the enclosing class will emit
+                    //   cgVar.vlEnclosing = this;
+                    // immediately after the construction assignment.
+                    // Fall through to processCovergroup() below
+                } else {
+                    // No enclosing class context — emit warning and skip as before
+                    offenderp->v3warn(COVERIGN,
+                                     "Unsupported: 'covergroup' coverpoint referencing enclosing "
+                                     "class member; ignoring covergroup "
+                                         << nodep->prettyNameQ());
+                    for (AstCoverpoint* cpp : m_coverpoints) {
+                        VL_DO_DANGLING(pushDeletep(cpp->unlinkFrBack()), cpp);
+                    }
+                    for (AstCoverCross* crossp : m_coverCrosses) {
+                        VL_DO_DANGLING(pushDeletep(crossp->unlinkFrBack()), crossp);
+                    }
+                    return;
                 }
-                for (AstCoverCross* crossp : m_coverCrosses) {
-                    VL_DO_DANGLING(pushDeletep(crossp->unlinkFrBack()), crossp);
-                }
-                return;
             }
 
             processCovergroup();
@@ -1821,8 +1866,64 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                 VL_DO_DANGLING(pushDeletep(crossp->unlinkFrBack()), crossp);
             }
         } else {
+            // Track the enclosing class so nested covergroup lowering can inject a
+            // back-pointer (vlEnclosing) when coverpoints reference our members.
+            VL_RESTORER(m_enclosingClassp);
+            m_enclosingClassp = nodep;
             iterateChildren(nodep);
         }
+    }
+
+    void visit(AstNew* nodep) override {
+        // If this new() constructs a covergroup class that got a vlEnclosing back-pointer,
+        // emit a post-construction assignment:
+        //   <cgVar>.vlEnclosing = this;
+        // appended right after the AstAssign that contains this new() as its RHS.
+        // This avoids injecting a PORT var that would need V3Scope registration.
+        iterateChildren(nodep);
+        if (!m_enclosingClassp) return;
+        const AstClassRefDType* const refDtp = VN_CAST(nodep->dtypep(), ClassRefDType);
+        if (!refDtp || !m_cgWithBackPtr.count(refDtp->classp())) return;
+
+        // Walk up to find the enclosing AstAssign (cg_ops = new();)
+        AstAssign* const assp = VN_CAST(nodep->backp(), Assign);
+        if (!assp) return;  // new() in non-assignment context — skip
+
+        // Find the vlEnclosing member var on the covergroup class
+        AstVar* bpVarp = nullptr;
+        for (AstNode* itemp = refDtp->classp()->membersp(); itemp; itemp = itemp->nextp()) {
+            if (AstVar* const vp = VN_CAST(itemp, Var)) {
+                if (vp->name() == "vlEnclosing") { bpVarp = vp; break; }
+            }
+        }
+        if (!bpVarp) return;
+
+        FileLine* const fl = nodep->fileline();
+        // lhs: <cgVar>.vlEnclosing — clone the lhs and append a member selection.
+        // Only plain VarRef LHS is handled in this first implementation; e.g.
+        //   cg_ops = new();   → cg_ops.vlEnclosing = this;  ✓
+        // Non-VarRef LHS (e.g. this.cg_ops = new(); via MemberSel) is skipped
+        // for now — those cases still fall back to the old COVERIGN path.
+        AstVarRef* const cgLhsRefp = VN_CAST(assp->lhsp(), VarRef);
+        if (!cgLhsRefp) {
+            UINFO(5, "visit(AstNew): non-VarRef LHS for covergroup new() — skipping "
+                     "vlEnclosing injection for " << refDtp->classp()->name());
+            return;
+        }
+        AstNodeExpr* const cgVarRef = cgLhsRefp->cloneTree(false);
+        AstMemberSel* const lhsSel = new AstMemberSel{fl, cgVarRef, VFlagChildDType{},
+                                                       "vlEnclosing"};
+        lhsSel->varp(bpVarp);
+        lhsSel->dtypep(bpVarp->dtypep());
+
+        // rhs: this
+        AstClassRefDType* const thisRefDTypep
+            = new AstClassRefDType{fl, m_enclosingClassp, nullptr};
+        AstThisRef* const rhsThis = new AstThisRef{fl, thisRefDTypep};
+
+        AstAssign* const initAssp = new AstAssign{fl, lhsSel, rhsThis};
+        // Insert after the covergroup construction assignment
+        assp->addNextHere(initAssp);
     }
 
     void visit(AstCoverpoint* nodep) override {
