@@ -7254,7 +7254,7 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
 bins_orBraE<fl>:  // IEEE: part of bins_or_options: returns fileline (abuse for boolean flag)
                 /* empty */                             { $$ = nullptr; }
         |       '[' ']'                                 { $$ = $<fl>1; /* Mark as array */ }
-        |       '[' cgexpr ']'                          { BBCOVERIGN($<fl>1, "Unsupported: 'bins' explicit array size (treated as '[]')"); DEL($2); $$ = $<fl>1; }
+        |       '[' cgexpr ']'                          { DEL($2); $$ = $<fl>1; /* Explicit [N] treated as [] — size validated in V3Covergroup */ }
         ;
 
 trans_list<nodep>:  // ==IEEE: trans_list

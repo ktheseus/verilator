@@ -114,6 +114,14 @@ run_expect_clean bins_value_range \
   t_bins_value_range
 
 echo ""
+echo "--- Explicit bins array size: bins b[N] = {values} ---"
+echo "    Pattern: bins states[4] = {IDLE,ACTIVE,ERROR,RESET} — previously COVERIGN"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean bins_explicit_size \
+  "$BASE/patch_edge_cases/t_bins_explicit_size.sv" \
+  t_bins_explicit_size
+
+echo ""
 echo "================================================================"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "================================================================"
