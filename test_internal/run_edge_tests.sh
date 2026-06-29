@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # run_edge_tests.sh — Phase 2 edge case tests for patch 7fb3e5d
 # Tests verify graceful handling of known unsupported patterns
+# Usage: VERILATOR_BIN=./bin/verilator zsh test_internal/run_edge_tests.sh
 set -uo pipefail
 
 PASS=0; FAIL=0
 BDIR=/tmp/vlt_edge_tests
 mkdir -p "$BDIR"
 
+VERILATOR_BIN="${VERILATOR_BIN:-$(cd "$(dirname "$0")/.." && echo "$PWD/bin/verilator")}"
 log() { printf "  %-12s %s\n" "[$1]" "$2"; }
 
 # expect_coverign: compile must succeed OR emit COVERIGN — must NOT crash internally
@@ -16,10 +18,10 @@ run_expect_coverign() {
   rm -rf "$out"; mkdir -p "$out"
 
   # Run verilator — allow exit code 1 (COVERIGN causes warning-as-error in strict mode)
-  verilator --binary --coverage --timing \
+  "$VERILATOR_BIN" --binary --coverage --timing \
     -Wno-WIDTHTRUNC -Wno-IMPLICITSTATIC -Wno-DECLFILENAME \
     --top-module "$top" \
-    --Mdir "$out/obj" -o "$out/sim" -j 0 \
+    --Mdir "$out/obj" -o "$out/sim" \
     "$sv" >"$out/build.log" 2>&1 || true  # allow failure
 
   # Must NOT be an internal compiler error
@@ -53,10 +55,10 @@ run_expect_clean() {
   local out="$BDIR/t_${name}"
   rm -rf "$out"; mkdir -p "$out"
 
-  if ! verilator --binary --coverage --timing \
+  if ! "$VERILATOR_BIN" --binary --coverage --timing \
        -Wno-WIDTHTRUNC -Wno-IMPLICITSTATIC -Wno-DECLFILENAME \
        --top-module "$top" \
-       --Mdir "$out/obj" -o "$out/sim" -j 0 \
+       --Mdir "$out/obj" -o "$out/sim" \
        "$sv" >"$out/build.log" 2>&1; then
     log "FAIL" "$name — build error"
     grep "%Error" "$out/build.log" | head -3 | sed 's/^/             /'
@@ -120,6 +122,22 @@ echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
 run_expect_clean bins_explicit_size \
   "$BASE/patch_edge_cases/t_bins_explicit_size.sv" \
   t_bins_explicit_size
+
+echo ""
+echo "--- bins with(expr) filter — IEEE 1800-2012 §19.7.1 ---"
+echo "    Pattern: bins even = {[0:15]} with (item % 2 == 0)"
+echo "    Expected: CLEAN compile + run (PASS output; COVERIGN suppressed by lint_off)"
+run_expect_clean bins_with_expr \
+  "$BASE/patch_edge_cases/t_bins_with_expr.sv" \
+  t_bins_with_expr
+
+echo ""
+echo "--- Transition repetition operators [*N], [->N], [=N] ---"
+echo "    Pattern: bins t = (a [* 3]) — previously BBCOVERIGN"
+echo "    Expected: CLEAN compile + run (PASS output; COVERIGN suppressed by lint_off)"
+run_expect_clean bins_trans_rep \
+  "$BASE/patch_edge_cases/t_bins_trans_rep.sv" \
+  t_bins_trans_rep
 
 echo ""
 echo "================================================================"
