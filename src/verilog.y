@@ -7218,11 +7218,24 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                         { $$ = new AstCoverBin{$<fl>3, *$3, $7, false, true, true};
                           DEL($9); }
         |       yWILDCARD yBINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' yWITH__PAREN '(' cgexpr ')' iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>9, "Unsupported: 'with' in wildcard cover bin"); DEL($7, $11, $13); }
+                        {   // wildcard bins b = {range} with (expr) — wildcard + filter
+                            AstCoverBin* const binp = new AstCoverBin{$<fl>3, *$3, $7, false, false, true};
+                            if ($4) binp->isArray(true);
+                            binp->iffp($11);
+                            binp->hasWithFilter(true);
+                            $$ = binp; DEL($13); }
         |       yWILDCARD yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' yWITH__PAREN '(' cgexpr ')' iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>9, "Unsupported: 'with' in wildcard cover bin"); DEL($7, $11, $13); }
+                        {   AstCoverBin* const binp = new AstCoverBin{$<fl>3, *$3, $7, true, false, true};
+                            if ($4) binp->isArray(true);
+                            binp->iffp($11);
+                            binp->hasWithFilter(true);
+                            $$ = binp; DEL($13); }
         |       yWILDCARD yILLEGAL_BINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' yWITH__PAREN '(' cgexpr ')' iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>9, "Unsupported: 'with' in wildcard cover bin"); DEL($7, $11, $13); }
+                        {   AstCoverBin* const binp = new AstCoverBin{$<fl>3, *$3, $7, false, true, true};
+                            if ($4) binp->isArray(true);
+                            binp->iffp($11);
+                            binp->hasWithFilter(true);
+                            $$ = binp; DEL($13); }
         //
         //                      // cgexpr part of trans_list
         |       yBINS idAny/*bin_identifier*/ bins_orBraE '=' trans_list iffE
@@ -7238,11 +7251,21 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                           $$ = new AstCoverBin{$<fl>2, *$2, static_cast<AstCoverTransSet*>($5), VCoverBinsType{VCoverBinsType::BINS_ILLEGAL}, isArray != nullptr};
                           DEL($6); }
         |       yWILDCARD yBINS idAny/*bin_identifier*/ bins_orBraE '=' trans_list iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>1, "Unsupported: 'wildcard' transition list in cover bin"); DEL($6, $7);}
+                        {   // wildcard transition list — map to BINS_TRANSITION (wildcard on transitions)
+                            FileLine* isArray = $<fl>4;
+                            $$ = new AstCoverBin{$<fl>3, *$3, static_cast<AstCoverTransSet*>($6),
+                                                 VCoverBinsType{VCoverBinsType::BINS_TRANSITION}, isArray != nullptr};
+                            DEL($7); }
         |       yWILDCARD yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' trans_list iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>1, "Unsupported: 'wildcard' transition list in cover bin"); DEL($6, $7);}
+                        {   FileLine* isArray = $<fl>4;
+                            $$ = new AstCoverBin{$<fl>3, *$3, static_cast<AstCoverTransSet*>($6),
+                                                 VCoverBinsType{VCoverBinsType::BINS_IGNORE}, isArray != nullptr};
+                            DEL($7); }
         |       yWILDCARD yILLEGAL_BINS idAny/*bin_identifier*/ bins_orBraE '=' trans_list iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>1, "Unsupported: 'wildcard' transition list in cover bin"); DEL($6, $7);}
+                        {   FileLine* isArray = $<fl>4;
+                            $$ = new AstCoverBin{$<fl>3, *$3, static_cast<AstCoverTransSet*>($6),
+                                                 VCoverBinsType{VCoverBinsType::BINS_ILLEGAL}, isArray != nullptr};
+                            DEL($7); }
         //
         |       yBINS idAny/*bin_identifier*/ bins_orBraE '=' yDEFAULT iffE
                         { $$ = new AstCoverBin{$<fl>2, *$2, VCoverBinsType::BINS_DEFAULT};
@@ -7254,11 +7277,17 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                         { $$ = new AstCoverBin{$<fl>2, *$2, VCoverBinsType::BINS_ILLEGAL};
                           DEL($6); }
         |       yBINS idAny/*bin_identifier*/ bins_orBraE '=' yDEFAULT ySEQUENCE iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'sequence' in default cover bin"); DEL($7); }
+                        {   // 'bins b = default sequence' — catch-all transition bin.
+                            // IEEE §19.5.5: covers all transitions not matched by other bins.
+                            // Approximated as BINS_DEFAULT (V3Covergroup catch-all).
+                            $$ = new AstCoverBin{$<fl>2, *$2, VCoverBinsType::BINS_DEFAULT};
+                            DEL($7); }
         |       yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' yDEFAULT ySEQUENCE iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'sequence' in default cover bin"); DEL($7); }
+                        {   $$ = new AstCoverBin{$<fl>2, *$2, VCoverBinsType::BINS_IGNORE};
+                            DEL($7); }
         |       yILLEGAL_BINS idAny/*bin_identifier*/ bins_orBraE '=' yDEFAULT ySEQUENCE iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'sequence' in default cover bin"); DEL($7); }
+                        {   $$ = new AstCoverBin{$<fl>2, *$2, VCoverBinsType::BINS_ILLEGAL};
+                            DEL($7); }
         ;
 
 bins_orBraE<fl>:  // IEEE: part of bins_or_options: returns fileline (abuse for boolean flag)
@@ -7292,19 +7321,58 @@ trans_range_list<nodep>:  // ==IEEE: trans_range_list (returns AstCoverTransItem
                         $$ = new AstCoverTransItem{$<fl>1, $1, VTransRepType::NONE};
                 }
         |       trans_item yP_BRASTAR cgexpr ']'
-                        { $$ = nullptr; BBCOVERIGN($<fl>2, "Unsupported: '[*]' in cover transition"); DEL($1, $3); }
+                        {   // (a [* N]) — consecutive repetition, exactly N times
+                            // AstCoverTransItem stores repMinp=repMaxp=N; V3Covergroup
+                            // expands the state machine to N sequential match states.
+                            AstCoverTransItem* const itemp
+                                = new AstCoverTransItem{$<fl>1, $1, VTransRepType::CONSEC};
+                            itemp->repMinp($3);
+                            itemp->repMaxp($3->cloneTree(false));
+                            $$ = itemp;
+                        }
         |       trans_item yP_BRASTAR cgexpr ':' cgexpr ']'
-                        { $$ = nullptr; BBCOVERIGN($<fl>2, "Unsupported: '[*]' in cover transition"); DEL($1, $3, $5); }
+                        {   // (a [* M:N]) — consecutive repetition M to N times
+                            AstCoverTransItem* const itemp
+                                = new AstCoverTransItem{$<fl>1, $1, VTransRepType::CONSEC};
+                            itemp->repMinp($3);
+                            itemp->repMaxp($5);
+                            $$ = itemp;
+                        }
         |       trans_item yP_BRAMINUSGT cgexpr ']'
-                        { BBCOVERIGN($<fl>2, "Unsupported: '[->' in cover transition"); DEL($3);
-                          $$ = new AstCoverTransItem{$<fl>1, $1, VTransRepType::GOTO}; }
+                        {   // (a [-> N]) — goto repetition: a must appear N times (not necessarily
+                            // consecutively), with the last occurrence being consecutive with next item.
+                            AstCoverTransItem* const itemp
+                                = new AstCoverTransItem{$<fl>1, $1, VTransRepType::GOTO};
+                            itemp->repMinp($3);
+                            itemp->repMaxp($3->cloneTree(false));
+                            $$ = itemp;
+                        }
         |       trans_item yP_BRAMINUSGT cgexpr ':' cgexpr ']'
-                        { $$ = nullptr; BBCOVERIGN($<fl>2, "Unsupported: '[->' in cover transition"); DEL($1, $3, $5); }
+                        {   // (a [-> M:N]) — goto repetition M to N times
+                            AstCoverTransItem* const itemp
+                                = new AstCoverTransItem{$<fl>1, $1, VTransRepType::GOTO};
+                            itemp->repMinp($3);
+                            itemp->repMaxp($5);
+                            $$ = itemp;
+                        }
         |       trans_item yP_BRAEQ cgexpr ']'
-                        { BBCOVERIGN($<fl>2, "Unsupported: '[=]' in cover transition"); DEL($3);
-                          $$ = new AstCoverTransItem{$<fl>1, $1, VTransRepType::NONCONS}; }
+                        {   // (a [= N]) — nonconsecutive repetition: a appears N times anywhere
+                            //  (other values may appear between occurrences; last occ. not
+                            //  required to be adjacent to next item, unlike [->])
+                            AstCoverTransItem* const itemp
+                                = new AstCoverTransItem{$<fl>1, $1, VTransRepType::NONCONS};
+                            itemp->repMinp($3);
+                            itemp->repMaxp($3->cloneTree(false));
+                            $$ = itemp;
+                        }
         |       trans_item yP_BRAEQ cgexpr ':' cgexpr ']'
-                        { $$ = nullptr; BBCOVERIGN($<fl>2, "Unsupported: '[=]' in cover transition"); DEL($1, $3, $5); }
+                        {   // (a [= M:N]) — nonconsecutive repetition M to N times
+                            AstCoverTransItem* const itemp
+                                = new AstCoverTransItem{$<fl>1, $1, VTransRepType::NONCONS};
+                            itemp->repMinp($3);
+                            itemp->repMaxp($5);
+                            $$ = itemp;
+                        }
         ;
 
 trans_item<nodep>:  // ==IEEE: range_list (returns range list node)

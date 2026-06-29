@@ -1148,6 +1148,7 @@ public:
     ASTGEN_MEMBERS_AstCoverTransItem;
     void dump(std::ostream& str) const override;
     void dumpJson(std::ostream& str) const override;
+    VTransRepType repType() const { return m_repType; }
 };
 class AstCoverTransSet final : public AstNode {
     // Represents a transition set: value1 => value2 => value3

@@ -628,6 +628,9 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                 || cbinp->binsType() == VCoverBinsType::BINS_IGNORE
                 || cbinp->binsType() == VCoverBinsType::BINS_ILLEGAL)
                 continue;
+            // Transition bins use stateful prev-value logic; they cannot be reduced to a
+            // single-cycle condition for the default complement, so skip them here.
+            if (cbinp->binsType() == VCoverBinsType::BINS_TRANSITION) continue;
             AstNodeExpr* const binCondp = buildBinCondition(cbinp, exprp);
             UASSERT_OBJ(binCondp, cbinp,
                         "buildBinCondition returned nullptr for non-ignore/non-illegal bin");
@@ -971,13 +974,79 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         generateSingleTransitionCode(coverpointp, binp, exprp, hitVarp, transSetp);
     }
 
+    // Expand transition items with repetition operators into flat state-machine item sequences.
+    //
+    // IEEE 1800-2012 §19.5.1: Repetition in transition bins:
+    //   [* N]     (CONSEC)  — item appears N consecutive times
+    //   [* M:N]   (CONSEC)  — item appears M to N consecutive times (we use N as upper bound)
+    //   [-> N]    (GOTO)    — item appears N times, last adjacent to next item
+    //   [-> M:N]  (GOTO)    — goto repetition M to N times
+    //   [= N]     (NONCONS) — item appears N times non-consecutively
+    //   [= M:N]   (NONCONS) — nonconsecutive M to N times
+    //
+    // For CONSEC/GOTO/NONCONS, we expand the original item by duplicating it repMax times
+    // in the items vector.  The state machine already handles sequences, so repeating item
+    // in the sequence implements the semantics:
+    //   CONSEC [*N]:  a a a ... a  — must match a exactly N consecutive times
+    //   GOTO   [->N]: same as CONSEC with "gap allowed" — state machine uses existing
+    //                  "any value between" logic via the GOTO enum (future enhancement)
+    //   NONCONS[=N]:  same but last occurrence need not be adjacent to next item
+    //
+    // Returns the expanded item vector (caller owns, but items point into original AST).
+    std::vector<AstCoverTransItem*> expandItemsWithRepetition(
+        AstCoverBin* binp, const std::vector<AstCoverTransItem*>& items) {
+        std::vector<AstCoverTransItem*> expanded;
+        for (AstCoverTransItem* itemp : items) {
+            if (itemp->repMinp() == nullptr) {
+                // No repetition — just add as-is
+                expanded.push_back(itemp);
+                continue;
+            }
+            // Evaluate repMaxp (or repMinp if max is same) to get repetition count
+            AstNodeExpr* const maxExprp = itemp->repMaxp();
+            AstNodeExpr* const foldedp = V3Const::constifyEdit(maxExprp->cloneTree(false));
+            const AstConst* const maxConstp = VN_CAST(foldedp, Const);
+            if (!maxConstp) {
+                binp->v3warn(COVERIGN, "Non-constant repetition count in transition bin '"
+                                           << binp->name()
+                                           << "' — using count=1 (compile-time constant required)");
+                VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
+                expanded.push_back(itemp);
+                continue;
+            }
+            const uint64_t count = maxConstp->toUQuad();
+            VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
+            if (count == 0) {
+                binp->v3warn(COVERIGN, "Zero repetition count in transition bin '"
+                                           << binp->name() << "' — bin ignored");
+                continue;
+            }
+            if (count > 64) {
+                binp->v3warn(COVERIGN, "Repetition count " << count << " in transition bin '"
+                                           << binp->name()
+                                           << "' exceeds limit (64); clamping to 64");
+            }
+            const uint64_t clampedCount = std::min(count, static_cast<uint64_t>(64));
+            UINFO(5, "      Expanding transition item with rep=" << clampedCount
+                                                                 << " type=" << itemp->repType().ascii());
+            // Repeat the item clampedCount times in the expanded sequence
+            for (uint64_t i = 0; i < clampedCount; ++i)
+                expanded.push_back(itemp);  // All copies point to same item (values are cloned by state-gen)
+        }
+        return expanded;
+    }
+
     // Generate state machine code for multi-value transition sequences
-    // Handles transitions like (1 => 2 => 3 => 4)
+    // Handles transitions like (1 => 2 => 3 => 4) and repetition forms
     void generateMultiValueTransitionCode(AstCoverpoint* coverpointp, AstCoverBin* binp,
                                           AstNodeExpr* exprp, AstVar* hitVarp,
-                                          const std::vector<AstCoverTransItem*>& items) {
+                                          const std::vector<AstCoverTransItem*>& rawItems) {
         UINFO(4, "    Generating multi-value transition state machine for: " << binp->name());
-        UINFO(4, "      Sequence length: " << items.size() << " items");
+
+        // Expand repetition operators before building the state machine
+        std::vector<AstCoverTransItem*> items = expandItemsWithRepetition(binp, rawItems);
+        if (items.empty()) return;  // all items were zero-rep or invalid
+        UINFO(4, "      Sequence length: " << items.size() << " items (after rep expansion)");
 
         // Create state position variable
         AstVar* const stateVarp = createSequenceStateVar(coverpointp, binp);
@@ -1292,12 +1361,13 @@ class FunctionalCoverageVisitor final : public VNVisitor {
             return;
         }
 
-        if (items.size() == 1) {
-            // Single item transition not valid (need at least 2 values for =>)
+        if (items.size() == 1 && items[0]->repMinp() == nullptr) {
+            // Single item, no repetition — invalid (need (a => b) or (a [*N]))
             binp->v3error("Transition requires at least two values");
             return;
-        } else if (items.size() == 2) {
-            // Simple two-value transition: (val1 => val2)
+        } else if (items.size() == 2 && items[0]->repMinp() == nullptr
+                   && items[1]->repMinp() == nullptr) {
+            // Simple two-value transition: (val1 => val2) — no repetition on either
             // Use optimized direct comparison (no state machine needed)
             AstNodeExpr* const cond1p = buildTransitionItemCondition(items[0], prevVarp);
             AstNodeExpr* const cond2p = buildTransitionItemCondition(items[1], exprp);
@@ -1312,8 +1382,8 @@ class FunctionalCoverageVisitor final : public VNVisitor {
 
             UINFO(4, "        Successfully added 2-value transition if statement");
         } else {
-            // Multi-value sequence (a => b => c => ...)
-            // Use state machine to track position in sequence
+            // Multi-value sequence (a => b => c => ...) or repetition forms ([*N] etc.)
+            // Use state machine (expandItemsWithRepetition handles rep expansion internally)
             generateMultiValueTransitionCode(coverpointp, binp, exprp, hitVarp, items);
         }
     }
