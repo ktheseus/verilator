@@ -3971,9 +3971,9 @@ covergroup_value_range<nodeExprp>:  // ==IEEE-2012: covergroup_value_range
         //                      // Skipped as '$' is part of our expr
         //                      // IEEE-2023: '[' cgexpr ':' '$' ']'
         |       '[' cgexpr yP_PLUSSLASHMINUS cgexpr ']'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: covergroup +/- value range"); DEL($2, $4); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: covergroup +/- value range — range ignored"); DEL($2, $4); }
         |       '[' cgexpr yP_PLUSPCTMINUS cgexpr ']'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: covergroup +%- value range"); DEL($2, $4); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: covergroup +%- value range — range ignored"); DEL($2, $4); }
         ;
 
 caseCondList<nodeExprp>:        // IEEE: part of case_item
@@ -7167,9 +7167,12 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                               $$ = new AstCoverBin{$<fl>2, *$2, $4};
                               DEL($6);
                           } else {
-                              $$ = nullptr;
-                              BBCOVERIGN($<fl>2, "Unsupported: 'bins' array (non-auto)");
-                              DEL($4, $6);
+                              // Non-auto named bins[] array — treat as bins auto[] (accept all values)
+                              // IEEE §19.6: named array size requires range list to determine count;
+                              // as approximation, use BINS_DEFAULT behavior.
+                              $<fl>2->v3warn(COVERIGN, "Unsupported: 'bins' named array (non-auto) — treated as auto");
+                              $$ = new AstCoverBin{$<fl>2, *$2, $4};
+                              DEL($6);
                           }
                         }
         |       yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' iffE
@@ -7210,19 +7213,19 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                                 VCoverBinsType::BINS_DEFAULT};
                             binp->v3warn(COVERIGN, "Unsupported: 'bins = coverpoint with(expr)'; "
                                                    "filter not applied — bin will match nothing");
-                            $$ = binp; DEL($5, $8, $10); }
+                            $$ = binp; DEL($8, $10); }
         |       yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE
                         {   AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2,
                                 VCoverBinsType::BINS_IGNORE};
                             binp->v3warn(COVERIGN, "Unsupported: 'ignore_bins = coverpoint with(expr)'; "
                                                    "filter not applied");
-                            $$ = binp; DEL($5, $8, $10); }
+                            $$ = binp; DEL($8, $10); }
         |       yILLEGAL_BINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE
                         {   AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2,
                                 VCoverBinsType::BINS_ILLEGAL};
                             binp->v3warn(COVERIGN, "Unsupported: 'illegal_bins = coverpoint with(expr)'; "
                                                    "filter not applied");
-                            $$ = binp; DEL($5, $8, $10); }
+                            $$ = binp; DEL($8, $10); }
         |       yWILDCARD yBINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' iffE
                         { $$ = new AstCoverBin{$<fl>3, *$3, $7, false, false, true};
                           DEL($9); }
@@ -7459,16 +7462,16 @@ cross_body_itemList<nodep>:  // IEEE: part of cross_body
 
 cross_body_item<nodep>:  // ==IEEE: cross_body_item
                 function_declaration
-                        { $$ = nullptr; BBCOVERIGN($1->fileline(), "Unsupported: 'function' in coverage cross body"); DEL($1); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: 'function' in coverage cross body — ignored"); DEL($1); }
         //                      // IEEE: bins_selection_or_option
         |       coverage_option ';'                     { $$ = $1; }
         //                      // IEEE: bins_selection - for now, we ignore explicit cross bins
         |       yBINS idAny/*new-bin_identifier*/ '=' select_expression iffE ';'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: explicit coverage cross bins"); DEL($4, $5); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: explicit coverage cross bins — ignored"); DEL($4, $5); }
         |       yIGNORE_BINS idAny/*new-bin_identifier*/ '=' select_expression iffE ';'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: explicit coverage cross bins"); DEL($4, $5); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: explicit coverage cross ignore_bins — ignored"); DEL($4, $5); }
         |       yILLEGAL_BINS idAny/*new-bin_identifier*/ '=' select_expression iffE ';'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: explicit coverage cross bins"); DEL($4, $5); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: explicit coverage cross illegal_bins — ignored"); DEL($4, $5); }
         |       error ';'                               { $$ = nullptr; }  // LCOV_EXCL_LINE
         ;
 
@@ -7476,28 +7479,28 @@ select_expression<nodep>:  // ==IEEE: select_expression
                 select_expression_r
                         { $$ = $1; }
         |       select_expression yP_ANDAND select_expression
-                        { $$ = nullptr; BBCOVERIGN($2, "Unsupported: '&&' in coverage select expression"); DEL($1, $3); }
+                        { $$ = nullptr; $2->v3warn(COVERIGN, "Unsupported: '&&' in coverage select expression — bin ignored"); DEL($1, $3); }
         |       select_expression yP_OROR   select_expression
-                        { $$ = nullptr; BBCOVERIGN($2, "Unsupported: '||' in coverage select expression"); DEL($1, $3); }
+                        { $$ = nullptr; $2->v3warn(COVERIGN, "Unsupported: '||' in coverage select expression — bin ignored"); DEL($1, $3); }
         ;
 
 // This non-terminal exists to disambiguate select_expression and make "with" bind tighter
 select_expression_r<nodep>:
         //                      // IEEE: select_condition expanded here
                 yBINSOF '(' bins_expression ')'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: 'binsof' in coverage select expression"); DEL($3); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: 'binsof' in coverage cross select — cross bin ignored"); DEL($3); }
         |       '!' yBINSOF '(' bins_expression ')'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: 'binsof' in coverage select expression"); DEL($4); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: '!binsof' in coverage cross select — cross bin ignored"); DEL($4); }
         |       yBINSOF '(' bins_expression ')' yINTERSECT '{' covergroup_range_list '}'
-                        { $$ = nullptr; BBCOVERIGN($5, "Unsupported: 'intersect' in coverage select expression"); DEL($7); }
+                        { $$ = nullptr; $5->v3warn(COVERIGN, "Unsupported: 'binsof intersect' in coverage cross select — cross bin ignored"); DEL($7); }
         |       '!' yBINSOF '(' bins_expression ')' yINTERSECT '{' covergroup_range_list '}'    { }
-                        { $$ = nullptr; BBCOVERIGN($5, "Unsupported: 'intersect' in coverage select expression"); DEL($4, $8); }
+                        { $$ = nullptr; $5->v3warn(COVERIGN, "Unsupported: '!binsof intersect' in coverage cross select — cross bin ignored"); DEL($4, $8); }
         |       yWITH__PAREN '(' cgexpr ')'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: 'with' in coverage select expression"); DEL($3); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: 'with' in coverage cross select expression — cross bin ignored"); DEL($3); }
         |       '!' yWITH__PAREN '(' cgexpr ')'
-                        { $$ = nullptr; BBCOVERIGN($1, "Unsupported: 'with' in coverage select expression"); DEL($4); }
+                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: '!with' in coverage cross select expression — cross bin ignored"); DEL($4); }
         |       select_expression_r yWITH__PAREN '(' cgexpr ')'
-                        { $$ = nullptr; BBCOVERIGN($2, "Unsupported: 'with' in coverage select expression"); DEL($1, $4); }
+                        { $$ = nullptr; $2->v3warn(COVERIGN, "Unsupported: 'select with' in coverage cross select expression — cross bin ignored"); DEL($1, $4); }
         //                      // IEEE-2012: Need clarification as to precedence
         //UNSUP yWITH__PAREN '(' cgexpr ')' yMATCHES cgexpr    { }
         //                      // IEEE-2012: Need clarification as to precedence
@@ -7515,7 +7518,7 @@ select_expression_r<nodep>:
         //UNSUP  cgexpr yMATCHES cgexpr    {..}
         //UNSUP                 // Below are all removed
         |       idAny '(' list_of_argumentsE ')'
-                        { $$ = nullptr; BBCOVERIGN($<fl>1, "Unsupported: function call in coverage select expression"); DEL($3); }
+                        { $$ = nullptr; $<fl>1->v3warn(COVERIGN, "Unsupported: function call in coverage select expression — cross bin ignored"); DEL($3); }
         //UNSUP                 // Above are all removed, replace with:
         ;
 
@@ -7545,7 +7548,11 @@ coverage_eventE<nodep>:  // IEEE: [ coverage_event ]
                           }
                         }
         |       yP_ATAT '(' block_event_expression ')'
-                        { $$ = nullptr; BBCOVERIGN($<fl>1, "Unsupported: '@@' coverage event"); DEL($3); }
+                        {   // '@@(begin/end event)' — block event expression for coverage sampling.
+                            // Temporal sequence matching not yet supported; covergroup will use
+                            // clocking_event or explicit sample() call instead.
+                            $<fl>1->v3warn(COVERIGN, "Unsupported: '@@' coverage event — using manual sample() instead");
+                            $$ = nullptr; DEL($3); }
         ;
 
 block_event_expression<nodep>:  // ==IEEE: block_event_expression
