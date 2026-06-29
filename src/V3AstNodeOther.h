@@ -1068,6 +1068,7 @@ class AstCoverBin final : public AstNode {
     const VCoverBinsType m_type;  // Bin type (eg AUTO, IGNORE, ILLEGAL)
     bool m_isArray = false;  // Bin is either an auto-sized array of values or transitions
     bool m_isWildcard = false;  // Bin uses wildcard matching (independent of ignore/illegal)
+    bool m_hasWithFilter = false;  // iffp() holds a 'with(expr)' filter (not a traditional iff)
 
 public:
     AstCoverBin(FileLine* fl, const string& name, AstNode* rangesp, bool isIgnore, bool isIllegal,
@@ -1112,6 +1113,8 @@ public:
     bool isWildcard() const { return m_isWildcard; }
     bool isArray() const { return m_isArray; }
     void isArray(bool flag) { m_isArray = flag; }
+    bool hasWithFilter() const { return m_hasWithFilter; }
+    void hasWithFilter(bool flag) { m_hasWithFilter = flag; }
 };
 class AstCoverOption final : public AstNode {
     // Coverage-option assignment

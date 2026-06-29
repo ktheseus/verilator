@@ -712,6 +712,87 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         return values;
     }
 
+    // Apply a 'with (expr)' filter to a list of bin values.
+    //
+    // IEEE 1800-2012 §19.7.1: bins b = {range_list} with (bool_expr)
+    // 'item' inside bool_expr refers to each candidate value being tested.
+    //
+    // Algorithm:
+    //   For each AstNodeExpr* v in |values|:
+    //     1. Clone the filter expression
+    //     2. Replace every AstVarRef{name="item"} with a clone of v
+    //     3. Constant-fold via V3Const::constifyEdit
+    //     4. If result is non-zero AstConst → keep v; else delete v
+    //
+    // Values that are not AstConst after folding (i.e., filter references
+    // non-constant variables other than 'item') trigger a COVERIGN warning
+    // and the entire filter is abandoned (all values are kept, no filtering).
+    //
+    // Returns: filtered subset of |values| (modifies vector in-place, deletes dropped nodes).
+    void applyWithFilter(AstCoverBin* cbinp, AstNodeExpr* filterp,
+                         std::vector<AstNodeExpr*>& values) {
+        UINFO(5, "    Applying with(expr) filter to " << values.size() << " bin values for "
+                                                      << cbinp->name());
+        std::vector<AstNodeExpr*> kept;
+        bool nonConstEncountered = false;
+
+        for (AstNodeExpr* valp : values) {
+            // 1. Clone the filter expression
+            AstNodeExpr* clonedFilterp = filterp->cloneTree(false);
+
+            // 2. Substitute 'item' → valp in the cloned filter.
+            //    After V3LinkDot silently skips 'item' resolution (m_inBinFilter=true),
+            //    the node remains as AstParseRef (not AstVarRef).  Match both forms.
+            //    We also match unresolved AstVarRef (name="item", varp=nullptr) for robustness.
+            clonedFilterp->foreach([&](AstNode* refp) {
+                const bool isParseRef
+                    = VN_IS(refp, ParseRef) && VN_AS(refp, ParseRef)->name() == "item";
+                const bool isVarRef
+                    = VN_IS(refp, VarRef) && VN_AS(refp, VarRef)->name() == "item"
+                      && !VN_AS(refp, VarRef)->varp();
+                if (isParseRef || isVarRef) {
+                    // Substitute with a clone of the value, inheriting its dtype
+                    AstNodeExpr* const substp = valp->cloneTree(false);
+                    refp->replaceWith(substp);
+                    VL_DO_DANGLING(pushDeletep(refp), refp);
+                }
+            });
+
+            // 3. Constant-fold the substituted expression.
+            //    V3Const::constifyEdit folds arithmetic/logical expressions when all
+            //    sub-expressions are AstConst (which they are after 'item' substitution).
+            AstNodeExpr* foldedp = V3Const::constifyEdit(clonedFilterp);
+
+            // 4. Evaluate the result
+            if (AstConst* const constp = VN_CAST(foldedp, Const)) {
+                if (!constp->isZero()) {
+                    kept.push_back(valp);  // passes filter
+                } else {
+                    VL_DO_DANGLING(pushDeletep(valp), valp);   // filtered out
+                }
+                VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
+            } else {
+                // Filter expression didn't fold to a constant — non-const variable reference
+                UINFO(4, "    with(expr) filter not constant-foldable for bin " << cbinp->name()
+                                                                                 << " — keeping all values");
+                VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
+                nonConstEncountered = true;
+                kept.push_back(valp);  // keep value — can't evaluate
+            }
+        }
+
+        if (nonConstEncountered) {
+            // At least one value couldn't be evaluated — warn and keep all values
+            cbinp->v3warn(COVERIGN, "bins with(expr) filter references non-constant expression; "
+                                    "filter not applied (all values kept)\n"
+                                    << cbinp->warnMore()
+                                    << "... hint: 'item' must only be compared against constants");
+            // kept already has all remaining values; unfilterd ones were pushed above
+        }
+
+        values = std::move(kept);
+    }
+
     // Emit a 'this->m_cp.addSingleNamer/addArrayNamer(...)' statement for one bin
     AstCStmt* makeNamer(AstVar* cpVarp, AstCoverBin* binp, int count) {
         FileLine* const fl = binp->fileline();
@@ -781,10 +862,44 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                 bool unsupported = false;
                 std::vector<AstNodeExpr*> values = extractArrayValues(cbinp, exprp, unsupported);
                 if (unsupported) continue;  // bin ignored (COVERIGN emitted); reserve no slot
+                // Apply with(expr) filter if present (bins b = {range} with (item % 2 == 0))
+                if (AstNodeExpr* const filterp = cbinp->iffp())
+                    applyWithFilter(cbinp, filterp, values);
+                if (values.empty()) continue;  // all values filtered out; skip this bin
                 namerStmts.push_back(makeNamer(cpVarp, cbinp, static_cast<int>(values.size())));
                 for (AstNodeExpr* valuep : values) {
                     emitConvHitIf(coverpointp, cbinp, cpVarp, idx++,
                                   new AstEq{cbinp->fileline(), exprp->cloneTree(false), valuep});
+                }
+            } else if (cbinp->iffp() && cbinp->rangesp()) {
+                // Non-array bin with with(expr) filter: expand ranges to individual values,
+                // apply filter, then build condition as union of equality checks.
+                // Example: bins load = {8'h04, 8'h08, 8'h0C} with (item != 8'h08)
+                bool unsupported = false;
+                // Temporarily mark as array to reuse extractArrayValues
+                cbinp->isArray(true);
+                std::vector<AstNodeExpr*> values = extractArrayValues(cbinp, exprp, unsupported);
+                cbinp->isArray(false);
+                if (!unsupported) {
+                    applyWithFilter(cbinp, cbinp->iffp(), values);
+                    if (!values.empty()) {
+                        namerStmts.push_back(makeNamer(cpVarp, cbinp, -1));
+                        // Build condition: cp_expr == v0 || cp_expr == v1 || ...
+                        FileLine* const bfl = cbinp->fileline();
+                        AstNodeExpr* condp = nullptr;
+                        for (AstNodeExpr* valuep : values) {
+                            AstNodeExpr* const eqp = new AstEq{bfl, exprp->cloneTree(false), valuep};
+                            condp = condp ? new AstOr{bfl, condp, eqp} : eqp;
+                        }
+                        emitConvHitIf(coverpointp, cbinp, cpVarp, idx, condp);
+                        ++idx;
+                    }  // else: all filtered out — skip slot (non-array bin: don't increment idx)
+                } else {
+                    // Fall back to normal (unfiltered) bin processing
+                    namerStmts.push_back(makeNamer(cpVarp, cbinp, -1));
+                    if (AstNodeExpr* const condp = buildBinCondition(cbinp, exprp))
+                        emitConvHitIf(coverpointp, cbinp, cpVarp, idx, condp);
+                    ++idx;
                 }
             } else {
                 namerStmts.push_back(makeNamer(cpVarp, cbinp, -1));

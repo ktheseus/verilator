@@ -7181,17 +7181,27 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                           if ($3) binp->isArray(true);
                           $$ = binp; DEL($8); }
         |       yBINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' yWITH__PAREN '(' cgexpr ')' iffE
-                        { AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $6, false, false};
-                          BBCOVERIGN($<fl>8, "Unsupported: 'with' in cover bin (bin created without filter)");
-                          DEL($10, $12); $$ = binp; }
+                        {   // 'bins b = { range_list } with (expr)'
+                            // Store the filter expression in iffp() for V3Covergroup evaluation.
+                            // V3Covergroup will constant-fold: for each value v in rangesp, it
+                            // evaluates expr[item→v] and keeps only truthy values.
+                            AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $6, false, false};
+                            if ($3) binp->isArray(true);
+                            binp->iffp($10);   // filter expr (cgexpr): item = loop var
+                            binp->hasWithFilter(true);
+                            $$ = binp; DEL($12); }
         |       yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' yWITH__PAREN '(' cgexpr ')' iffE
-                        { AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $6, true, false};
-                          BBCOVERIGN($<fl>8, "Unsupported: 'with' in cover bin (bin created without filter)");
-                          DEL($10, $12); $$ = binp; }
+                        {   AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $6, true, false};
+                            if ($3) binp->isArray(true);
+                            binp->iffp($10);
+                            binp->hasWithFilter(true);
+                            $$ = binp; DEL($12); }
         |       yILLEGAL_BINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' yWITH__PAREN '(' cgexpr ')' iffE
-                        { AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $6, false, true};
-                          BBCOVERIGN($<fl>8, "Unsupported: 'with' in cover bin (bin created without filter)");
-                          DEL($10, $12); $$ = binp; }
+                        {   AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $6, false, true};
+                            if ($3) binp->isArray(true);
+                            binp->iffp($10);
+                            binp->hasWithFilter(true);
+                            $$ = binp; DEL($12); }
         |       yBINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE
                         { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'with' in cover bin"); DEL($8, $10); }
         |       yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE

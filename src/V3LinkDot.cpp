@@ -3112,6 +3112,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
     int m_indent = 0;  // Indentation (tree depth) for debug
     bool m_inSens = false;  // True if in senitem
     const AstWith* m_currentWithp = nullptr;  // Enclosing 'with' (nullptr if none)
+    bool m_inBinFilter = false;  // Inside AstCoverBin.iffp() — 'item' is a loop var, not a VarRef
     std::set<std::string>
         m_restrictedNamesUsed;  // Names from current 'with (id_list)' that resolved into target
     bool m_genericIfaceModule = false;  // True if in module containing generic interface
@@ -4696,6 +4697,14 @@ class LinkDotResolveVisitor final : public VNVisitor {
                         = (!m_ds.m_dotp && m_ds.m_dotText == "" && !m_ds.m_disablep && !foundp);
                     const bool err
                         = !(checkImplicit && m_statep->implicitOk(m_modp, nodep->name()));
+                    // bins with(expr): 'item' is a synthetic loop variable injected by
+                    // V3Covergroup during bins lowering — it has no declaration in any scope.
+                    // Leave it unresolved (no error, no implicit var) so V3Covergroup can
+                    // substitute it per-value via applyWithFilter().
+                    if (m_inBinFilter && nodep->name() == "item") {
+                        UINFO(5, "Leaving 'item' unresolved in bins with(expr) filter: " << nodep);
+                        return;  // skip implicit-var creation and error
+                    }
                     if (err) {
                         if (foundp) {
                             nodep->v3error("Found definition of '"
@@ -5676,6 +5685,24 @@ class LinkDotResolveVisitor final : public VNVisitor {
             }
         }
         m_ds.m_dotSymp = VL_RESTORER_PREV(m_curSymp);
+    }
+    // AstCoverBin: traverse iffp() (the with-expr filter) with m_inBinFilter set so that
+    // the synthetic 'item' loop variable doesn't trigger "Can't find definition" errors.
+    // V3Covergroup will substitute 'item' with the actual bin values during lowering.
+    void visit(AstCoverBin* nodep) override {
+        LINKDOT_VISIT_START();
+        UINFO(5, indent() << "visit " << nodep);
+        checkNoDot(nodep);
+        // Visit non-filter operands normally
+        if (nodep->rangesp()) iterate(nodep->rangesp());
+        if (nodep->arraySizep()) iterate(nodep->arraySizep());
+        if (nodep->transp()) iterate(nodep->transp());
+        // Visit the with(expr) filter with m_inBinFilter=true
+        if (nodep->iffp()) {
+            VL_RESTORER(m_inBinFilter);
+            m_inBinFilter = true;
+            iterate(nodep->iffp());
+        }
     }
     void visit(AstLambdaArgRef* nodep) override {
         LINKDOT_VISIT_START();
