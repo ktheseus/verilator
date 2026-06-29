@@ -6078,8 +6078,10 @@ class LinkDotResolveVisitor final : public VNVisitor {
                 if (AstTypedef* const defp
                     = foundp ? VN_CAST(foundp->nodep(), Typedef) : nullptr) {
                     // Don't check if typedef is to a <type T>::<reference> as might not be
-                    // resolved yet
-                    if (!nodep->classOrPackagep() && !defp->isUnderClass())
+                    // resolved yet. Also skip for package-imported typedefs: the package is
+                    // always parsed before the importing module, so the declaration is
+                    // guaranteed to be elaborated -- forward-ref ordering is not applicable.
+                    if (!nodep->classOrPackagep() && !defp->isUnderClass() && !foundp->imported())
                         checkDeclOrder(nodep, defp);
                     nodep->typedefp(defp);
                     nodep->classOrPackagep(foundp->classOrPackagep());
@@ -6119,8 +6121,11 @@ class LinkDotResolveVisitor final : public VNVisitor {
                 } else if (AstClass* const defp
                            = foundp ? VN_CAST(foundp->nodep(), Class) : nullptr) {
                     // Don't check if typedef is to a <type T>::<reference> as might not be
-                    // resolved yet
-                    if (!nodep->classOrPackagep()) checkDeclOrder(nodep, defp);
+                    // resolved yet. Also skip for package-imported classes: packages are parsed
+                    // before the modules that import them, so the class is fully elaborated
+                    // before any reference to it can occur in the importing module context.
+                    if (!nodep->classOrPackagep() && !foundp->imported())
+                        checkDeclOrder(nodep, defp);
                     AstPin* const paramsp = nodep->paramsp();
                     if (paramsp) paramsp->unlinkFrBackWithNext();
                     AstClassRefDType* const newp
