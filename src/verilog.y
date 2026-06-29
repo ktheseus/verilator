@@ -7203,11 +7203,26 @@ bins_or_options<nodep>:  // ==IEEE: bins_or_options
                             binp->hasWithFilter(true);
                             $$ = binp; DEL($12); }
         |       yBINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'with' in cover bin"); DEL($8, $10); }
+                        {   // 'bins b = other_cp with (expr)' — bins from another coverpoint
+                            // Cross-coverpoint bin filtering requires elaboration-time resolution
+                            // not yet supported; degrade gracefully (emit COVERIGN, no filter).
+                            AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2,
+                                VCoverBinsType::BINS_DEFAULT};
+                            binp->v3warn(COVERIGN, "Unsupported: 'bins = coverpoint with(expr)'; "
+                                                   "filter not applied — bin will match nothing");
+                            $$ = binp; DEL($5, $8, $10); }
         |       yIGNORE_BINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'with' in cover bin"); DEL($8, $10); }
+                        {   AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2,
+                                VCoverBinsType::BINS_IGNORE};
+                            binp->v3warn(COVERIGN, "Unsupported: 'ignore_bins = coverpoint with(expr)'; "
+                                                   "filter not applied");
+                            $$ = binp; DEL($5, $8, $10); }
         |       yILLEGAL_BINS idAny/*bin_identifier*/ bins_orBraE '=' id/*cover_point_id*/ yWITH__PAREN '(' cgexpr ')' iffE
-                        { $$ = nullptr; BBCOVERIGN($<fl>6, "Unsupported: 'with' in cover bin"); DEL($8, $10); }
+                        {   AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2,
+                                VCoverBinsType::BINS_ILLEGAL};
+                            binp->v3warn(COVERIGN, "Unsupported: 'illegal_bins = coverpoint with(expr)'; "
+                                                   "filter not applied");
+                            $$ = binp; DEL($5, $8, $10); }
         |       yWILDCARD yBINS idAny/*bin_identifier*/ bins_orBraE '=' '{' range_list '}' iffE
                         { $$ = new AstCoverBin{$<fl>3, *$3, $7, false, false, true};
                           DEL($9); }

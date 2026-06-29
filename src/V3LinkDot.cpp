@@ -5693,15 +5693,15 @@ class LinkDotResolveVisitor final : public VNVisitor {
         LINKDOT_VISIT_START();
         UINFO(5, indent() << "visit " << nodep);
         checkNoDot(nodep);
-        // Visit non-filter operands normally
-        if (nodep->rangesp()) iterate(nodep->rangesp());
-        if (nodep->arraySizep()) iterate(nodep->arraySizep());
-        if (nodep->transp()) iterate(nodep->transp());
+        // Visit non-filter operands normally (use iterateAndNext for list ops)
+        iterateAndNextNull(nodep->rangesp());
+        iterateAndNextNull(nodep->arraySizep());
+        iterateAndNextNull(nodep->transp());
         // Visit the with(expr) filter with m_inBinFilter=true
         if (nodep->iffp()) {
             VL_RESTORER(m_inBinFilter);
             m_inBinFilter = true;
-            iterate(nodep->iffp());
+            iterateAndNextNull(nodep->iffp());
         }
     }
     void visit(AstLambdaArgRef* nodep) override {
