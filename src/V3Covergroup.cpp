@@ -46,6 +46,7 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     AstClass* m_covergroupp = nullptr;  // Current covergroup being processed
     AstClass* m_enclosingClassp = nullptr;  // Enclosing class that owns this covergroup
     std::set<const AstClass*> m_cgWithBackPtr;  // Covergroup classes that got vlEnclosing injected
+    bool m_isNewInjectionPass = false;  // True during back-pointer injection pass
     AstFunc* m_sampleFuncp = nullptr;  // Current sample() function
     AstFunc* m_constructorp = nullptr;  // Current constructor
     std::vector<AstCoverpoint*> m_coverpoints;  // Coverpoints in current covergroup
@@ -974,6 +975,14 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         generateSingleTransitionCode(coverpointp, binp, exprp, hitVarp, transSetp);
     }
 
+    struct ExpandedTransItem {
+        AstCoverTransItem* itemp;
+        size_t blockStartIdx;
+        size_t blockEndIdx;
+        uint64_t repMin;
+        uint64_t repMax;
+    };
+
     // Expand transition items with repetition operators into flat state-machine item sequences.
     //
     // IEEE 1800-2012 §19.5.1: Repetition in transition bins:
@@ -993,45 +1002,67 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     //   NONCONS[=N]:  same but last occurrence need not be adjacent to next item
     //
     // Returns the expanded item vector (caller owns, but items point into original AST).
-    std::vector<AstCoverTransItem*> expandItemsWithRepetition(
+    std::vector<ExpandedTransItem> expandItemsWithRepetition(
         AstCoverBin* binp, const std::vector<AstCoverTransItem*>& items) {
-        std::vector<AstCoverTransItem*> expanded;
+        std::vector<ExpandedTransItem> expanded;
         for (AstCoverTransItem* itemp : items) {
             if (itemp->repMinp() == nullptr) {
                 // No repetition — just add as-is
-                expanded.push_back(itemp);
+                ExpandedTransItem entry;
+                entry.itemp = itemp;
+                entry.blockStartIdx = expanded.size();
+                entry.blockEndIdx = expanded.size() + 1;
+                entry.repMin = 1;
+                entry.repMax = 1;
+                expanded.push_back(entry);
                 continue;
             }
-            // Evaluate repMaxp (or repMinp if max is same) to get repetition count
-            AstNodeExpr* const maxExprp = itemp->repMaxp();
-            AstNodeExpr* const foldedp = V3Const::constifyEdit(maxExprp->cloneTree(false));
-            const AstConst* const maxConstp = VN_CAST(foldedp, Const);
-            if (!maxConstp) {
-                binp->v3warn(COVERIGN, "Non-constant repetition count in transition bin '"
-                                           << binp->name()
-                                           << "' — using count=1 (compile-time constant required)");
+            // Evaluate repMin and repMax range bounds
+            uint64_t repMin = 1;
+            uint64_t repMax = 1;
+            if (itemp->repMinp()) {
+                AstNodeExpr* const minExprp = itemp->repMinp();
+                AstNodeExpr* const foldedp = V3Const::constifyEdit(minExprp->cloneTree(false));
+                if (const AstConst* const constp = VN_CAST(foldedp, Const)) {
+                    repMin = constp->toUQuad();
+                }
                 VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
-                expanded.push_back(itemp);
-                continue;
             }
-            const uint64_t count = maxConstp->toUQuad();
-            VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
-            if (count == 0) {
+            if (itemp->repMaxp()) {
+                AstNodeExpr* const maxExprp = itemp->repMaxp();
+                AstNodeExpr* const foldedp = V3Const::constifyEdit(maxExprp->cloneTree(false));
+                if (const AstConst* const constp = VN_CAST(foldedp, Const)) {
+                    repMax = constp->toUQuad();
+                }
+                VL_DO_DANGLING(pushDeletep(foldedp), foldedp);
+            } else {
+                repMax = repMin;
+            }
+            if (repMax == 0) {
                 binp->v3warn(COVERIGN, "Zero repetition count in transition bin '"
                                            << binp->name() << "' — bin ignored");
                 continue;
             }
-            if (count > 64) {
-                binp->v3warn(COVERIGN, "Repetition count " << count << " in transition bin '"
+            if (repMax > 64) {
+                binp->v3warn(COVERIGN, "Repetition count " << repMax << " in transition bin '"
                                            << binp->name()
                                            << "' exceeds limit (64); clamping to 64");
             }
-            const uint64_t clampedCount = std::min(count, static_cast<uint64_t>(64));
+            const uint64_t clampedCount = std::min(repMax, static_cast<uint64_t>(64));
+            const size_t startIdx = expanded.size();
+            const size_t endIdx = expanded.size() + clampedCount;
             UINFO(5, "      Expanding transition item with rep=" << clampedCount
                                                                  << " type=" << itemp->repType().ascii());
             // Repeat the item clampedCount times in the expanded sequence
-            for (uint64_t i = 0; i < clampedCount; ++i)
-                expanded.push_back(itemp);  // All copies point to same item (values are cloned by state-gen)
+            for (uint64_t i = 0; i < clampedCount; ++i) {
+                ExpandedTransItem entry;
+                entry.itemp = itemp;
+                entry.blockStartIdx = startIdx;
+                entry.blockEndIdx = endIdx;
+                entry.repMin = repMin;
+                entry.repMax = repMax;
+                expanded.push_back(entry);
+            }
         }
         return expanded;
     }
@@ -1044,7 +1075,7 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         UINFO(4, "    Generating multi-value transition state machine for: " << binp->name());
 
         // Expand repetition operators before building the state machine
-        std::vector<AstCoverTransItem*> items = expandItemsWithRepetition(binp, rawItems);
+        std::vector<ExpandedTransItem> items = expandItemsWithRepetition(binp, rawItems);
         if (items.empty()) return;  // all items were zero-rep or invalid
         UINFO(4, "      Sequence length: " << items.size() << " items (after rep expansion)");
 
@@ -1084,12 +1115,12 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     AstCaseItem* generateTransitionStateCase(AstCoverpoint* coverpointp, AstCoverBin* binp,
                                              AstNodeExpr* exprp, AstVar* hitVarp,
                                              AstVar* stateVarp,
-                                             const std::vector<AstCoverTransItem*>& items,
+                                             const std::vector<ExpandedTransItem>& items,
                                              size_t state) {
         FileLine* const fl = binp->fileline();
 
         // Build condition for current value matching expected item at this state
-        AstNodeExpr* matchCondp = buildTransitionItemCondition(items[state], exprp);
+        AstNodeExpr* matchCondp = buildTransitionItemCondition(items[state].itemp, exprp);
 
         // Apply iff condition if present
         if (AstNodeExpr* iffp = coverpointp->iffp()) {
@@ -1097,6 +1128,8 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         }
 
         AstNodeStmt* matchActionp = nullptr;
+        const string errMsg = "Illegal transition bin " + binp->prettyNameQ()
+                              + " hit in coverpoint " + coverpointp->prettyNameQ();
 
         if (state == items.size() - 1) {
             // Last state: sequence complete!
@@ -1105,8 +1138,6 @@ class FunctionalCoverageVisitor final : public VNVisitor {
 
             // For illegal_bins, add error message
             if (binp->binsType() == VCoverBinsType::BINS_ILLEGAL) {
-                const string errMsg = "Illegal transition bin " + binp->prettyNameQ()
-                                      + " hit in coverpoint " + coverpointp->prettyNameQ();
                 matchActionp = matchActionp->addNext(makeIllegalBinAction(fl, errMsg));
             }
 
@@ -1126,38 +1157,63 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         AstNodeStmt* noMatchActionp = nullptr;
         if (state > 0) {
             // Check if current value matches first item (restart condition)
-            AstNodeExpr* restartCondp = buildTransitionItemCondition(items[0], exprp);
+            AstNodeExpr* restartCondp = buildTransitionItemCondition(items[0].itemp, exprp);
 
-            UASSERT_OBJ(restartCondp, items[0],
-                        "buildTransitionItemCondition returned nullptr for restart");
-            // Apply iff condition
             if (AstNodeExpr* iffp = coverpointp->iffp()) {
                 restartCondp = new AstAnd{fl, iffp->cloneTree(false), restartCondp};
             }
 
-            // Restart to state 1
-            AstNodeStmt* restartActionp
-                = new AstAssign{fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
-                                new AstConst{fl, AstConst::WidthedValue{}, 8, 1}};
-
-            // Reset to state 0 (else branch)
-            AstNodeStmt* resetActionp
-                = new AstAssign{fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
-                                new AstConst{fl, AstConst::WidthedValue{}, 8, 0}};
-
-            noMatchActionp = new AstIf{fl, restartCondp, restartActionp, resetActionp};
+            noMatchActionp = new AstIf{
+                fl, restartCondp,
+                new AstAssign{fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
+                              new AstConst{fl, AstConst::WidthedValue{}, 8, 1}},
+                new AstAssign{fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
+                              new AstConst{fl, AstConst::WidthedValue{}, 8, 0}}};
+        } else {
+            // State 0: remain in state 0
+            noMatchActionp = new AstAssign{
+                fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
+                new AstConst{fl, AstConst::WidthedValue{}, 8, 0}};
         }
-        // For state 0, no action needed if no match (stay in state 0)
 
-        // Combine into if-else
-        AstNodeStmt* const stmtp = new AstIf{fl, matchCondp, matchActionp, noMatchActionp};
+        // Check if this state falls within an optional repetition range (M <= k < N)
+        // If so, we can alternatively match the item following the repetition block directly!
+        const auto& curr = items[state];
+        const size_t nextState = curr.blockEndIdx;
+        const bool isOptional = (curr.repMax > curr.repMin) && (state >= curr.blockStartIdx + curr.repMin - 1 && state < curr.blockEndIdx);
 
-        // Create case item for this state value
-        AstCaseItem* const caseItemp = new AstCaseItem{
+        if (isOptional && nextState < items.size()) {
+            AstNodeExpr* altMatchCondp = buildTransitionItemCondition(items[nextState].itemp, exprp);
+            if (AstNodeExpr* iffp = coverpointp->iffp()) {
+                altMatchCondp = new AstAnd{fl, iffp->cloneTree(false), altMatchCondp};
+            }
+
+            AstNodeStmt* altActionp = nullptr;
+            if (nextState == items.size() - 1) {
+                altActionp = makeBinHitIncrement(fl, hitVarp);
+                if (binp->binsType() == VCoverBinsType::BINS_ILLEGAL) {
+                    altActionp = altActionp->addNext(makeIllegalBinAction(fl, errMsg));
+                }
+                altActionp = altActionp->addNext(
+                    new AstAssign{fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
+                                  new AstConst{fl, AstConst::WidthedValue{}, 8, 0}});
+            } else {
+                altActionp = new AstAssign{
+                    fl, new AstVarRef{fl, stateVarp, VAccess::WRITE},
+                    new AstConst{fl, AstConst::WidthedValue{}, 8, static_cast<uint32_t>(nextState + 1)}};
+            }
+
+            // Generate conditional logic:
+            // if (altMatch) altAction; else if (match) matchAction; else noMatchAction;
+            return new AstCaseItem{
+                fl, new AstConst{fl, AstConst::WidthedValue{}, 8, static_cast<uint32_t>(state)},
+                new AstIf{fl, altMatchCondp, altActionp,
+                          new AstIf{fl, matchCondp, matchActionp, noMatchActionp}}};
+        }
+
+        return new AstCaseItem{
             fl, new AstConst{fl, AstConst::WidthedValue{}, 8, static_cast<uint32_t>(state)},
-            stmtp};
-
-        return caseItemp;
+            new AstIf{fl, matchCondp, matchActionp, noMatchActionp}};
     }
 
     // Create: $error(msg); $stop;  Used when an illegal bin is hit.
@@ -1388,6 +1444,109 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         }
     }
 
+    string extractDottedName(AstNode* nodep) {
+        if (!nodep) return "";
+        if (const AstParseRef* const refp = VN_CAST(nodep, ParseRef)) {
+            return refp->name();
+        } else if (const AstDot* const dotp = VN_CAST(nodep, Dot)) {
+            string lhs = extractDottedName(dotp->lhsp());
+            string rhs = extractDottedName(dotp->rhsp());
+            if (lhs.empty()) return rhs;
+            if (rhs.empty()) return lhs;
+            return lhs + "." + rhs;
+        } else if (const AstText* const textp = VN_CAST(nodep, Text)) {
+            return textp->text();
+        }
+        return "";
+    }
+
+    bool rangesOverlap(AstNode* r1p, AstNode* r2p) {
+        for (AstNode* n1 = r1p; n1; n1 = n1->nextp()) {
+            for (AstNode* n2 = r2p; n2; n2 = n2->nextp()) {
+                uint64_t min1 = 0, max1 = 0;
+                if (const AstInsideRange* const r = VN_CAST(n1, InsideRange)) {
+                    if (const AstConst* const c = VN_CAST(r->lhsp(), Const)) min1 = c->toUQuad();
+                    if (const AstConst* const c = VN_CAST(r->rhsp(), Const)) max1 = c->toUQuad();
+                } else if (const AstConst* const c = VN_CAST(n1, Const)) {
+                    min1 = max1 = c->toUQuad();
+                } else {
+                    continue;
+                }
+
+                uint64_t min2 = 0, max2 = 0;
+                if (const AstInsideRange* const r = VN_CAST(n2, InsideRange)) {
+                    if (const AstConst* const c = VN_CAST(r->lhsp(), Const)) min2 = c->toUQuad();
+                    if (const AstConst* const c = VN_CAST(r->rhsp(), Const)) max2 = c->toUQuad();
+                } else if (const AstConst* const c = VN_CAST(n2, Const)) {
+                    min2 = max2 = c->toUQuad();
+                } else {
+                    continue;
+                }
+
+                if (min1 <= max2 && min2 <= max1) return true;
+            }
+        }
+        return false;
+    }
+
+    bool evaluateSelectExpression(AstNode* exprp, const std::vector<AstCoverpoint*>& coverpointRefs,
+                                  const std::vector<AstCoverBin*>& combBins) {
+        if (!exprp) return false;
+        if (const AstCoverCrossBinSelect* const selp = VN_CAST(exprp, CoverCrossBinSelect)) {
+            string targetPath = extractDottedName(selp->exprp());
+            size_t cpIdx = -1;
+            string binName = "";
+            size_t dotPos = targetPath.rfind('.');
+            string cpName = targetPath;
+            if (dotPos != string::npos) {
+                cpName = targetPath.substr(0, dotPos);
+                binName = targetPath.substr(dotPos + 1);
+            }
+
+            for (size_t i = 0; i < coverpointRefs.size(); ++i) {
+                if (coverpointRefs[i]->name() == cpName) {
+                    cpIdx = i;
+                    break;
+                }
+            }
+
+            if (cpIdx == -1) return false;
+
+            AstCoverBin* combBin = combBins[cpIdx];
+            if (!binName.empty() && combBin->name() != binName) return false;
+
+            if (selp->rangesp()) {
+                if (!rangesOverlap(combBin->rangesp(), selp->rangesp())) return false;
+            }
+
+            return true;
+        } else if (const AstCoverCrossBinAnd* const andp = VN_CAST(exprp, CoverCrossBinAnd)) {
+            return evaluateSelectExpression(andp->lhsp(), coverpointRefs, combBins)
+                && evaluateSelectExpression(andp->rhsp(), coverpointRefs, combBins);
+        } else if (const AstCoverCrossBinOr* const orp = VN_CAST(exprp, CoverCrossBinOr)) {
+            return evaluateSelectExpression(orp->lhsp(), coverpointRefs, combBins)
+                || evaluateSelectExpression(orp->rhsp(), coverpointRefs, combBins);
+        } else if (const AstCoverCrossBinNot* const notp = VN_CAST(exprp, CoverCrossBinNot)) {
+            return !evaluateSelectExpression(notp->childp(), coverpointRefs, combBins);
+        }
+        return false;
+    }
+
+    void collectAllCombinations(const std::vector<std::vector<AstCoverBin*>>& allCpBins,
+                                std::vector<std::vector<AstCoverBin*>>& combinations,
+                                std::vector<AstCoverBin*>& currentCombination,
+                                size_t dimension) {
+        if (dimension == allCpBins.size()) {
+            combinations.push_back(currentCombination);
+            return;
+        }
+        for (AstCoverBin* binp : allCpBins[dimension]) {
+            currentCombination.push_back(binp);
+            collectAllCombinations(allCpBins, combinations, currentCombination, dimension + 1);
+            currentCombination.pop_back();
+        }
+    }
+
     // Recursive helper to generate Cartesian product of cross bins
     void generateCrossBinsRecursive(AstCoverCross* crossp,
                                     const std::vector<AstCoverpoint*>& coverpointRefs,
@@ -1517,8 +1676,101 @@ class FunctionalCoverageVisitor final : public VNVisitor {
             allCpBins.push_back(cpBins);
         }
 
-        // Generate cross bins using Cartesian product
-        generateCrossBinsRecursive(crossp, coverpointRefs, allCpBins, {}, 0);
+        // Collect explicit cross bins
+        std::vector<AstCoverBin*> userCrossBins;
+        std::vector<AstCoverBin*> ignoreCrossBins;
+        std::vector<AstCoverBin*> illegalCrossBins;
+        for (AstNode* it = crossp->rawBodyp(); it; it = it->nextp()) {
+            if (AstCoverBin* const binp = VN_CAST(it, CoverBin)) {
+                if (binp->binsType() == VCoverBinsType::BINS_IGNORE) {
+                    ignoreCrossBins.push_back(binp);
+                } else if (binp->binsType() == VCoverBinsType::BINS_ILLEGAL) {
+                    illegalCrossBins.push_back(binp);
+                } else {
+                    userCrossBins.push_back(binp);
+                }
+            }
+        }
+
+        // Generate combinations
+        std::vector<std::vector<AstCoverBin*>> combinations;
+        std::vector<AstCoverBin*> currentCombination;
+        collectAllCombinations(allCpBins, combinations, currentCombination, 0);
+
+        if (userCrossBins.empty()) {
+            // Generate default combinations, but filter out ignored/illegal ones
+            for (const auto& comb : combinations) {
+                bool ignore = false;
+                bool illegal = false;
+
+                for (AstCoverBin* ignoreBin : ignoreCrossBins) {
+                    if (evaluateSelectExpression(ignoreBin->rangesp(), coverpointRefs, comb)) {
+                        ignore = true;
+                        break;
+                    }
+                }
+                for (AstCoverBin* illegalBin : illegalCrossBins) {
+                    if (evaluateSelectExpression(illegalBin->rangesp(), coverpointRefs, comb)) {
+                        illegal = true;
+                        break;
+                    }
+                }
+
+                if (ignore || illegal) continue;
+
+                generateOneCrossBin(crossp, coverpointRefs, comb);
+            }
+        } else {
+            // Generate only user explicit cross bins!
+            for (AstCoverBin* userBin : userCrossBins) {
+                std::vector<std::vector<AstCoverBin*>> matchingCombs;
+                for (const auto& comb : combinations) {
+                    if (evaluateSelectExpression(userBin->rangesp(), coverpointRefs, comb)) {
+                        bool ignore = false;
+                        for (AstCoverBin* ignoreBin : ignoreCrossBins) {
+                            if (evaluateSelectExpression(ignoreBin->rangesp(), coverpointRefs, comb)) {
+                                ignore = true;
+                                break;
+                            }
+                        }
+                        if (!ignore) matchingCombs.push_back(comb);
+                    }
+                }
+
+                if (matchingCombs.empty()) continue;
+
+                string varName = "__Vcov_" + crossp->name() + "_" + sanitizeGeneratedName(userBin->name());
+                AstVar* const varp = createCoverageCounterVar(crossp->fileline(), varName, matchingCombs[0][0]->findUInt32DType());
+
+                AstCoverBin* const pseudoBinp = new AstCoverBin{
+                    crossp->fileline(), userBin->name(), static_cast<AstNode*>(nullptr), false, false};
+                m_binInfos.push_back(BinInfo(pseudoBinp, varp, 1, nullptr, crossp, userBin->name()));
+
+                AstNodeExpr* fullOrCondp = nullptr;
+                for (const auto& comb : matchingCombs) {
+                    AstNodeExpr* combAndCondp = nullptr;
+                    for (size_t i = 0; i < comb.size(); ++i) {
+                        AstNodeExpr* const exprp = coverpointRefs[i]->exprp();
+                        AstNodeExpr* const condp = buildBinCondition(comb[i], exprp);
+                        if (combAndCondp) {
+                            combAndCondp = new AstAnd{crossp->fileline(), combAndCondp, condp};
+                        } else {
+                            combAndCondp = condp;
+                        }
+                    }
+
+                    if (fullOrCondp) {
+                        fullOrCondp = new AstOr{crossp->fileline(), fullOrCondp, combAndCondp};
+                    } else {
+                        fullOrCondp = combAndCondp;
+                    }
+                }
+
+                AstNodeStmt* const incrp = makeBinHitIncrement(crossp->fileline(), varp);
+                AstIf* const ifp = new AstIf{crossp->fileline(), fullOrCondp, incrp};
+                m_sampleFuncp->addStmtsp(ifp);
+            }
+        }
     }
 
     AstNodeExpr* buildBinCondition(AstCoverBin* binp, AstNodeExpr* exprp) {
@@ -1899,6 +2151,7 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     void visit(AstClass* nodep) override {
         UINFO(9, "Visiting class: " << nodep->name() << " isCovergroup=" << nodep->isCovergroup());
         if (nodep->isCovergroup()) {
+            if (m_isNewInjectionPass) return;
             VL_RESTORER(m_covergroupp);
             VL_RESTORER(m_sampleFuncp);
             VL_RESTORER(m_constructorp);
@@ -2013,6 +2266,7 @@ class FunctionalCoverageVisitor final : public VNVisitor {
                     nodep->addMembersp(bpVarp);
                     // Record that this covergroup class now needs 'this' injected at new() sites
                     m_cgWithBackPtr.insert(nodep);
+                    std::cout << "Inserted into m_cgWithBackPtr: " << nodep->name() << " pointer=" << nodep << std::endl;
 
                     // Rewrite all offending VarRefs to go through bpVarp.
                     const auto rewrite = [&](AstNode* rootp) {
@@ -2094,13 +2348,12 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     }
 
     void visit(AstNew* nodep) override {
+        if (!m_isNewInjectionPass) return;  // Skip during pass 1
         // If this new() constructs a covergroup class that got a vlEnclosing back-pointer,
         // emit a post-construction assignment:
-        //   <cgVar>.vlEnclosing = this;
+        //   <cgVar>.vlEnclosing = <enclosing_instance>;
         // appended right after the AstAssign that contains this new() as its RHS.
-        // This avoids injecting a PORT var that would need V3Scope registration.
         iterateChildren(nodep);
-        if (!m_enclosingClassp) return;
         const AstClassRefDType* const refDtp = VN_CAST(nodep->dtypep(), ClassRefDType);
         if (!refDtp || !m_cgWithBackPtr.count(refDtp->classp())) return;
 
@@ -2118,30 +2371,31 @@ class FunctionalCoverageVisitor final : public VNVisitor {
         if (!bpVarp) return;
 
         FileLine* const fl = nodep->fileline();
-        // lhs: <cgLhs>.vlEnclosing — clone the entire LHS of the assign and
-        // append a vlEnclosing member selection.  We support any LHS expr:
-        //   cg_ops = new();       → cg_ops.vlEnclosing = this;        ✓  (VarRef)
-        //   this.cg_ops = new();  → this.cg_ops.vlEnclosing = this;   ✓  (MemberSel)
-        //   arr[i].cg = new();    → arr[i].cg.vlEnclosing = this;     ✓  (ArraySel)
+        // lhs: <cgLhs>.vlEnclosing
         AstNodeExpr* const cgVarRef = assp->lhsp() ? assp->lhsp()->cloneTree(false) : nullptr;
-        if (!cgVarRef) {
-            UINFO(5, "visit(AstNew): null LHS for covergroup new() — skipping "
-                     "vlEnclosing injection for " << refDtp->classp()->name());
-            return;
-        }
+        if (!cgVarRef) return;
         AstMemberSel* const lhsSel = new AstMemberSel{fl, cgVarRef, VFlagChildDType{},
                                                        "vlEnclosing"};
         lhsSel->varp(bpVarp);
         lhsSel->dtypep(bpVarp->dtypep());
 
-        // rhs: this
-        AstClassRefDType* const thisRefDTypep
-            = new AstClassRefDType{fl, m_enclosingClassp, nullptr};
-        AstThisRef* const rhsThis = new AstThisRef{fl, thisRefDTypep};
+        // rhs: either 'this' (internal construction) or prefix instance (external construction)
+        AstNodeExpr* rhsVal = nullptr;
+        if (const AstMemberSel* const selp = VN_CAST(assp->lhsp(), MemberSel)) {
+            // External construction (Edge Case B): obj.cg = new(); -> obj.cg.vlEnclosing = obj;
+            rhsVal = selp->fromp()->cloneTree(false);
+        } else if (m_enclosingClassp) {
+            // Internal construction: cg = new(); -> cg.vlEnclosing = this;
+            AstClassRefDType* const thisRefDTypep
+                = new AstClassRefDType{fl, m_enclosingClassp, nullptr};
+            rhsVal = new AstThisRef{fl, thisRefDTypep};
+        }
 
-        AstAssign* const initAssp = new AstAssign{fl, lhsSel, rhsThis};
-        // Insert after the covergroup construction assignment
-        assp->addNextHere(initAssp);
+        if (rhsVal) {
+            AstAssign* const initAssp = new AstAssign{fl, lhsSel, rhsVal};
+            // Insert after the covergroup construction assignment
+            assp->addNextHere(initAssp);
+        }
     }
 
     void visit(AstCoverpoint* nodep) override {
@@ -2160,8 +2414,12 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
 public:
-    // CONSTRUCTORS
-    explicit FunctionalCoverageVisitor(AstNetlist* nodep) { iterate(nodep); }
+    explicit FunctionalCoverageVisitor(AstNetlist* nodep) {
+        m_isNewInjectionPass = false;
+        iterate(nodep);
+        m_isNewInjectionPass = true;
+        iterate(nodep);
+    }
     ~FunctionalCoverageVisitor() override = default;
 };
 

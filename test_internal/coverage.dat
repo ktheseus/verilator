@@ -1,0 +1,50 @@
+# SystemC::Coverage-3
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl105n36tlinepagev_line/semaphoreoblockS105hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl106n43tlinepagev_line/semaphoreoblockS106hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl107n47tlinepagev_line/semaphoreoblockS107hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl109n14tlinepagev_line/semaphoreoblockS109-110hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl113n19tlinepagev_line/semaphoreoblockS113-114hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl117n10tlinepagev_line/semaphoreoblockS117,119,126-131hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl122n34texprpagev_expr/semaphoreo((m_keyCount >= keyCount)==0) => 0hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl122n34texprpagev_expr/semaphoreo((m_keyCount >= keyCount)==1 && (m_nextKeyCount > m_keyCount)==1) => 1hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl122n34texprpagev_expr/semaphoreo((m_nextKeyCount > m_keyCount)==0) => 0hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl122n7tbranchpagev_branch/semaphoreoifS122-124hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl122n8tbranchpagev_branch/semaphoreoelsehstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl135n18tlinepagev_line/semaphoreoblockS135,137-138hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl136n7tbranchpagev_branch/semaphoreoifS136hstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl136n8tbranchpagev_branch/semaphoreoelsehstd::semaphore__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl143n3tlinepagev_line/processoblockS143hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl156n29tlinepagev_line/processoblockS156-157,159,161hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl164n29tlinepagev_line/processoblockS164,166hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl170n20tlinepagev_line/processoblockS170,172hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl178n19tlinepagev_line/processoblockS178-179hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl186n19tlinepagev_line/processoblockS186-187hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl190n10tlinepagev_line/processoblockS190,192hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl192n34texprpagev_expr/processo((status() == process::FINISHED)==0 && (status() == process::KILLED)==0) => 0hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl192n34texprpagev_expr/processo((status() == process::FINISHED)==1) => 1hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl192n34texprpagev_expr/processo((status() == process::KILLED)==1) => 1hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl196n17tlinepagev_line/processoblockS196,198hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl198n7tlinepagev_line/processoblockS198-199hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl232n21tlinepagev_line/processoblockS232,234,236-237hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl240n19tlinepagev_line/processoblockS240-241hstd::process__Vclpkg' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/include/verilated_std.svl246n16tlinepagev_line/stdoblockS246-247hstd' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl32n17tlinepagev_line/t_bins_trans_repoblockS32ht_bins_trans_rep' 1
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl34n8tlinepagev_line/t_bins_trans_repoblockS34-36ht_bins_trans_rep' 17
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl39n3tlinepagev_line/t_bins_trans_repoblockS39,41,43,45,47,49,55ht_bins_trans_rep' 1
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl51n5tbranchpagev_branch/t_bins_trans_repoifS51-52ht_bins_trans_rep' 1
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl51n6tbranchpagev_branch/t_bins_trans_repoelseS54ht_bins_trans_rep' 0
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl7n15tlinepagev_line/t_bins_trans_repoblockS7ht_bins_trans_rep' 1
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[0]:0->1ht_bins_trans_rep' 5
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[0]:1->0ht_bins_trans_rep' 5
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[1]:0->1ht_bins_trans_rep' 4
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[1]:1->0ht_bins_trans_rep' 4
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[2]:0->1ht_bins_trans_rep' 2
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[2]:1->0ht_bins_trans_rep' 2
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[3]:0->1ht_bins_trans_rep' 2
+C 'f/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl8n15ttogglepagev_toggle/t_bins_trans_repoval[3]:1->0ht_bins_trans_rep' 2
+C 'tcovergrouppagev_covergroup/cg_transf/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl15n12binthree_fiveshcg_trans.cp.three_fives' 0
+C 'tcovergrouppagev_covergroup/cg_transf/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl17n12bintwo_A_gotohcg_trans.cp.two_A_goto' 0
+C 'tcovergrouppagev_covergroup/cg_transf/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl19n12bintwo_3_nonconshcg_trans.cp.two_3_noncons' 0
+C 'tcovergrouppagev_covergroup/cg_transf/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl21n12binone_rangehcg_trans.cp.one_range' 0
+C 'tcovergrouppagev_covergroup/cg_transf/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl24n12binnorm_transhcg_trans.cp.norm_trans' 1
+C 'tcovergrouppagev_covergroup/cg_transf/Users/kevin/Work/IPs/verilator_src/test_internal/patch_edge_cases/t_bins_trans_rep.svl27n12binother_transhcg_trans.cp.other_trans' 14

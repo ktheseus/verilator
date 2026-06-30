@@ -140,6 +140,27 @@ run_expect_clean bins_trans_rep \
   t_bins_trans_rep
 
 echo ""
+echo "--- Explicit cross bins & repetition ranges ---"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean new_features \
+  "$BASE/patch_edge_cases/t_new_features.sv" \
+  t_new_features
+
+echo ""
+echo "--- Edge Case B: external covergroup new() construction ---"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean edgeB_external \
+  "$BASE/patch_edge_cases/t_edgeB_external.sv" \
+  t_edgeB_external
+
+echo ""
+echo "--- Struct member coverpoint crossing & query APIs ---"
+echo "    Expected: CLEAN compile + run (PASS output, no COVERIGN)"
+run_expect_clean struct_cross \
+  "$BASE/patch_edge_cases/t_struct_cross.sv" \
+  t_struct_cross
+
+echo ""
 echo "================================================================"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "================================================================"

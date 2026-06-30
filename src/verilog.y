@@ -7467,11 +7467,17 @@ cross_body_item<nodep>:  // ==IEEE: cross_body_item
         |       coverage_option ';'                     { $$ = $1; }
         //                      // IEEE: bins_selection - for now, we ignore explicit cross bins
         |       yBINS idAny/*new-bin_identifier*/ '=' select_expression iffE ';'
-                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: explicit coverage cross bins — ignored"); DEL($4, $5); }
+                        { AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $4, false, false};
+                          if ($5) binp->iffp($5);
+                          $$ = binp; }
         |       yIGNORE_BINS idAny/*new-bin_identifier*/ '=' select_expression iffE ';'
-                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: explicit coverage cross ignore_bins — ignored"); DEL($4, $5); }
+                        { AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $4, true, false};
+                          if ($5) binp->iffp($5);
+                          $$ = binp; }
         |       yILLEGAL_BINS idAny/*new-bin_identifier*/ '=' select_expression iffE ';'
-                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: explicit coverage cross illegal_bins — ignored"); DEL($4, $5); }
+                        { AstCoverBin* const binp = new AstCoverBin{$<fl>2, *$2, $4, false, true};
+                          if ($5) binp->iffp($5);
+                          $$ = binp; }
         |       error ';'                               { $$ = nullptr; }  // LCOV_EXCL_LINE
         ;
 
@@ -7479,22 +7485,23 @@ select_expression<nodep>:  // ==IEEE: select_expression
                 select_expression_r
                         { $$ = $1; }
         |       select_expression yP_ANDAND select_expression
-                        { $$ = nullptr; $2->v3warn(COVERIGN, "Unsupported: '&&' in coverage select expression — bin ignored"); DEL($1, $3); }
+                        { $$ = new AstCoverCrossBinAnd{$<fl>2, $1, $3}; }
         |       select_expression yP_OROR   select_expression
-                        { $$ = nullptr; $2->v3warn(COVERIGN, "Unsupported: '||' in coverage select expression — bin ignored"); DEL($1, $3); }
+                        { $$ = new AstCoverCrossBinOr{$<fl>2, $1, $3}; }
         ;
 
 // This non-terminal exists to disambiguate select_expression and make "with" bind tighter
 select_expression_r<nodep>:
         //                      // IEEE: select_condition expanded here
                 yBINSOF '(' bins_expression ')'
-                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: 'binsof' in coverage cross select — cross bin ignored"); DEL($3); }
+                        { $$ = new AstCoverCrossBinSelect{$<fl>1, $3, nullptr}; }
         |       '!' yBINSOF '(' bins_expression ')'
-                        { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: '!binsof' in coverage cross select — cross bin ignored"); DEL($4); }
+                        { $$ = new AstCoverCrossBinNot{$<fl>1, new AstCoverCrossBinSelect{$<fl>2, $4, nullptr}}; }
         |       yBINSOF '(' bins_expression ')' yINTERSECT '{' covergroup_range_list '}'
-                        { $$ = nullptr; $5->v3warn(COVERIGN, "Unsupported: 'binsof intersect' in coverage cross select — cross bin ignored"); DEL($7); }
-        |       '!' yBINSOF '(' bins_expression ')' yINTERSECT '{' covergroup_range_list '}'    { }
-                        { $$ = nullptr; $5->v3warn(COVERIGN, "Unsupported: '!binsof intersect' in coverage cross select — cross bin ignored"); DEL($4, $8); }
+                        { $$ = new AstCoverCrossBinSelect{$<fl>1, $3, $7}; }
+        |       '!' yBINSOF '(' bins_expression ')' yINTERSECT '{' covergroup_range_list '}'
+                        { AstCoverCrossBinSelect* const selp = new AstCoverCrossBinSelect{$<fl>2, $4, $8};
+                          $$ = new AstCoverCrossBinNot{$<fl>1, selp}; }
         |       yWITH__PAREN '(' cgexpr ')'
                         { $$ = nullptr; $1->v3warn(COVERIGN, "Unsupported: 'with' in coverage cross select expression — cross bin ignored"); DEL($3); }
         |       '!' yWITH__PAREN '(' cgexpr ')'
@@ -7531,7 +7538,7 @@ bins_expression<nodep>:  // ==IEEE: bins_expression
         // Verilator supports hierarchical reference in a place of variable identifier.
         // This is an extension based on other simulators.
                idDotted
-                        { $$ = nullptr; /*UNSUP*/ DEL($1); }
+                        { $$ = $1; }
         ;
 
 coverage_eventE<nodep>:  // IEEE: [ coverage_event ]

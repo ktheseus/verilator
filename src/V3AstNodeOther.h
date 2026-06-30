@@ -1116,6 +1116,49 @@ public:
     bool hasWithFilter() const { return m_hasWithFilter; }
     void hasWithFilter(bool flag) { m_hasWithFilter = flag; }
 };
+class AstCoverCrossBinAnd final : public AstNode {
+    // @astgen op1 := lhsp : AstNode
+    // @astgen op2 := rhsp : AstNode
+public:
+    AstCoverCrossBinAnd(FileLine* fl, AstNode* lhsp, AstNode* rhsp)
+        : ASTGEN_SUPER_CoverCrossBinAnd(fl) {
+        this->lhsp(lhsp);
+        this->rhsp(rhsp);
+    }
+    ASTGEN_MEMBERS_AstCoverCrossBinAnd;
+};
+class AstCoverCrossBinNot final : public AstNode {
+    // @astgen op1 := childp : AstNode
+public:
+    AstCoverCrossBinNot(FileLine* fl, AstNode* childp)
+        : ASTGEN_SUPER_CoverCrossBinNot(fl) {
+        this->childp(childp);
+    }
+    ASTGEN_MEMBERS_AstCoverCrossBinNot;
+};
+class AstCoverCrossBinOr final : public AstNode {
+    // @astgen op1 := lhsp : AstNode
+    // @astgen op2 := rhsp : AstNode
+public:
+    AstCoverCrossBinOr(FileLine* fl, AstNode* lhsp, AstNode* rhsp)
+        : ASTGEN_SUPER_CoverCrossBinOr(fl) {
+        this->lhsp(lhsp);
+        this->rhsp(rhsp);
+    }
+    ASTGEN_MEMBERS_AstCoverCrossBinOr;
+};
+class AstCoverCrossBinSelect final : public AstNode {
+    // @astgen op1 := rangesp : List[AstNode]      // Intersect range list
+    // @astgen op2 := exprp   : AstNode            // Dotted expression cp_or_bin
+public:
+    AstCoverCrossBinSelect(FileLine* fl, AstNode* exprp, AstNode* rangesp)
+        : ASTGEN_SUPER_CoverCrossBinSelect(fl) {
+        this->exprp(exprp);
+        addRangesp(rangesp);
+    }
+    ASTGEN_MEMBERS_AstCoverCrossBinSelect;
+    string name() const override VL_MT_STABLE { return ""; }
+};
 class AstCoverOption final : public AstNode {
     // Coverage-option assignment
     // @astgen op1 := valuep : AstNodeExpr

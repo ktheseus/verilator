@@ -3113,6 +3113,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
     bool m_inSens = false;  // True if in senitem
     const AstWith* m_currentWithp = nullptr;  // Enclosing 'with' (nullptr if none)
     bool m_inBinFilter = false;  // Inside AstCoverBin.iffp() — 'item' is a loop var, not a VarRef
+    bool m_inSelectExpr = false;  // Inside explicit cross select expression
     std::set<std::string>
         m_restrictedNamesUsed;  // Names from current 'with (id_list)' that resolved into target
     bool m_genericIfaceModule = false;  // True if in module containing generic interface
@@ -4697,6 +4698,10 @@ class LinkDotResolveVisitor final : public VNVisitor {
                         = (!m_ds.m_dotp && m_ds.m_dotText == "" && !m_ds.m_disablep && !foundp);
                     const bool err
                         = !(checkImplicit && m_statep->implicitOk(m_modp, nodep->name()));
+                    if (m_inSelectExpr) {
+                        UINFO(5, "Leaving ParseRef unresolved in covergroup select expression: " << nodep);
+                        return;  // skip error
+                    }
                     // bins with(expr): 'item' is a synthetic loop variable injected by
                     // V3Covergroup during bins lowering — it has no declaration in any scope.
                     // Leave it unresolved (no error, no implicit var) so V3Covergroup can
@@ -5703,6 +5708,34 @@ class LinkDotResolveVisitor final : public VNVisitor {
             m_inBinFilter = true;
             iterateAndNextNull(nodep->iffp());
         }
+    }
+    void visit(AstCoverCrossBinSelect* nodep) override {
+        LINKDOT_VISIT_START();
+        checkNoDot(nodep);
+        VL_RESTORER(m_inSelectExpr);
+        m_inSelectExpr = true;
+        iterateChildren(nodep);
+    }
+    void visit(AstCoverCrossBinAnd* nodep) override {
+        LINKDOT_VISIT_START();
+        checkNoDot(nodep);
+        VL_RESTORER(m_inSelectExpr);
+        m_inSelectExpr = true;
+        iterateChildren(nodep);
+    }
+    void visit(AstCoverCrossBinOr* nodep) override {
+        LINKDOT_VISIT_START();
+        checkNoDot(nodep);
+        VL_RESTORER(m_inSelectExpr);
+        m_inSelectExpr = true;
+        iterateChildren(nodep);
+    }
+    void visit(AstCoverCrossBinNot* nodep) override {
+        LINKDOT_VISIT_START();
+        checkNoDot(nodep);
+        VL_RESTORER(m_inSelectExpr);
+        m_inSelectExpr = true;
+        iterateChildren(nodep);
     }
     void visit(AstLambdaArgRef* nodep) override {
         LINKDOT_VISIT_START();

@@ -1391,19 +1391,25 @@ class LinkParseVisitor final : public VNVisitor {
         // Distribute the parse-time raw cross_body list (rawBodyp, op3) into the
         // typed optionsp slot.  The grammar produces AstCgOptionAssign nodes for
         // option.* items; convert them to AstCoverOption exactly as visit(AstCoverpoint*)
-        // does.  Other items (functions, unsupported bin selectors) are discarded.
+        // does. Other items (like explicit cross bins AstCoverBin) are preserved in rawBodyp().
         for (AstNode *itemp = nodep->rawBodyp(), *nextp; itemp; itemp = nextp) {
             nextp = itemp->nextp();
-            itemp->unlinkFrBack();
-            AstCgOptionAssign* const optp = VN_AS(itemp, CgOptionAssign);
-            const VCoverOptionType optType = optp->optionType();
-            optp->v3warn(COVERIGN,
-                         "Ignoring unsupported coverage cross option: " + optp->prettyNameQ());
-            // Always preserve the option node so V3Coverage can track its source line
-            // for coverage annotation, even when the option itself is unsupported.
-            nodep->addOptionsp(
-                new AstCoverOption{optp->fileline(), optType, optp->valuep()->cloneTree(false)});
-            VL_DO_DANGLING(optp->deleteTree(), optp);
+            if (AstCgOptionAssign* const optp = VN_CAST(itemp, CgOptionAssign)) {
+                itemp->unlinkFrBack();
+                const VCoverOptionType optType = optp->optionType();
+                optp->v3warn(COVERIGN,
+                             "Ignoring unsupported coverage cross option: " + optp->prettyNameQ());
+                // Always preserve the option node so V3Coverage can track its source line
+                // for coverage annotation, even when the option itself is unsupported.
+                nodep->addOptionsp(
+                    new AstCoverOption{optp->fileline(), optType, optp->valuep()->cloneTree(false)});
+                VL_DO_DANGLING(optp->deleteTree(), optp);
+            } else if (AstCoverBin* const binp = VN_CAST(itemp, CoverBin)) {
+                // Preserve explicit cross bins in rawBodyp()
+            } else {
+                itemp->unlinkFrBack();
+                VL_DO_DANGLING(itemp->deleteTree(), itemp);
+            }
         }
         iterateChildren(nodep);
     }

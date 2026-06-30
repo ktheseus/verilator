@@ -1976,6 +1976,28 @@ class WidthVisitor final : public VNVisitor {
         userIterateAndNext(nodep->arraySizep(), nullptr);
         userIterateAndNext(nodep->transp(), nullptr);
     }
+    void visit(AstCoverCrossBinAnd* nodep) override {
+        userIterateAndNext(nodep->lhsp(), nullptr);
+        userIterateAndNext(nodep->rhsp(), nullptr);
+    }
+    void visit(AstCoverCrossBinNot* nodep) override {
+        userIterateAndNext(nodep->childp(), nullptr);
+    }
+    void visit(AstCoverCrossBinOr* nodep) override {
+        userIterateAndNext(nodep->lhsp(), nullptr);
+        userIterateAndNext(nodep->rhsp(), nullptr);
+    }
+    void visit(AstCoverCrossBinSelect* nodep) override {
+        for (AstNode *nextp, *itemp = nodep->rangesp(); itemp; itemp = nextp) {
+            nextp = itemp->nextp();
+            if (VN_IS(itemp, InsideRange)) {
+                userIterate(itemp, nullptr);
+            } else {
+                userIterate(itemp, WidthVP{SELF, BOTH}.p());
+                V3Const::constifyEdit(itemp);
+            }
+        }
+    }
     void visit(AstPow* nodep) override {
         // Pow is special, output sign only depends on LHS sign, but
         // function result depends on both signs
