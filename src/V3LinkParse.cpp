@@ -1401,8 +1401,8 @@ class LinkParseVisitor final : public VNVisitor {
                              "Ignoring unsupported coverage cross option: " + optp->prettyNameQ());
                 // Always preserve the option node so V3Coverage can track its source line
                 // for coverage annotation, even when the option itself is unsupported.
-                nodep->addOptionsp(
-                    new AstCoverOption{optp->fileline(), optType, optp->valuep()->cloneTree(false)});
+                nodep->addOptionsp(new AstCoverOption{optp->fileline(), optType,
+                                                      optp->valuep()->cloneTree(false)});
                 VL_DO_DANGLING(optp->deleteTree(), optp);
             } else if (AstCoverBin* const binp = VN_CAST(itemp, CoverBin)) {
                 // Preserve explicit cross bins in rawBodyp()

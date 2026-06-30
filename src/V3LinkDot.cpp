@@ -4699,7 +4699,8 @@ class LinkDotResolveVisitor final : public VNVisitor {
                     const bool err
                         = !(checkImplicit && m_statep->implicitOk(m_modp, nodep->name()));
                     if (m_inSelectExpr) {
-                        UINFO(5, "Leaving ParseRef unresolved in covergroup select expression: " << nodep);
+                        UINFO(5, "Leaving ParseRef unresolved in covergroup select expression: "
+                                     << nodep);
                         return;  // skip error
                     }
                     // bins with(expr): 'item' is a synthetic loop variable injected by

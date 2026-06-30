@@ -1971,8 +1971,7 @@ class WidthVisitor final : public VNVisitor {
         }
         // iffp() is either a traditional 'iff(cond)' (width-check normally) or a 'with(expr)'
         // filter that contains unresolved 'item' VarRefs — skip width in the filter case.
-        if (nodep->iffp() && !nodep->hasWithFilter())
-            userIterateAndNext(nodep->iffp(), nullptr);
+        if (nodep->iffp() && !nodep->hasWithFilter()) userIterateAndNext(nodep->iffp(), nullptr);
         userIterateAndNext(nodep->arraySizep(), nullptr);
         userIterateAndNext(nodep->transp(), nullptr);
     }
